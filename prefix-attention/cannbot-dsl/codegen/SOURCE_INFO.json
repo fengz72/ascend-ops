@@ -1,0 +1,49 @@
+{
+  "description": "AscendC codegen snapshots dumped by cannbotdsl: the DN macro kernel (float16 specialization, launch_prefix_macro_dn.asc) and the AICPU metadata planner kernel (codegen/aicpu/, dtype-independent).",
+  "generated_by": {
+    "cannbotdsl_version": "0.7.0",
+    "cannbotdsl_commit": "af8e71f5d7d72a882e460ff85a388426716a2a07",
+    "cannbotdsl_build_timestamp": "2026-09-30T08:13:04Z",
+    "npu_arch": "dav-3510 (__NPU_ARCH__ == 3510)",
+    "host_abi_version": 9,
+    "env": {
+      "DN kernel": "CANNBOTDSL_DUMP_ASCENDC=1 CANNBOTDSL_DUMP_DIR=<codegen/>",
+      "AICPU metadata": "_prefix_attn_metadata_kernel.generate_sources(launch_mode='interface')"
+    }
+  },
+  "compile_case": {
+    "dtype": "float16",
+    "prefix": 20,
+    "private_length": 130,
+    "batches": 10,
+    "total_tokens": 1320,
+    "n1": 14,
+    "n2": 2,
+    "head_dim": 64,
+    "note": "T/B are dynamic Dims in the AOT spec; the snapshot is the fp16 trace of _launch_prefix_macro_dn (kernel__PrefixMacroKernelDn___call___0)."
+  },
+  "sources_sha256": {
+    "__init__.py": "9bd5086d03b9b0f6e0d9c647aa72f6dbeb58eae9479cc8f4f83e551805fe01bd",
+    "dn.py": "b7d09a56ed59db1a09c053894a981d0f5f4f9bf0dcea207d10fe2ecd1545884b",
+    "metadata.py": "ce1907a301bb7de53fd22c541b4b43fabeb974398c85e4d80f86505eb4183f50",
+    "validate.py": "26621b9b4b93996d20933e06a2b1a21a9a46116e2a1e6052ec99726d86427d38"
+  },
+  "notes": [
+    "File layout: device kernel (namespace cannbotdsl_92, guarded by __NPU_ARCH__==3510) + host schema/invoke ABI (extern \"C\" entries at the tail).",
+    "bfloat16 mentions only appear in the generic runtime prelude helpers, not in the kernel body (fp16 specialization).",
+    "Regeneration command: see README.md 'codegen 快照再生成'.",
+    "AICPU sources are generated text (no DUMP env needed); the runtime compiles them from a tempdir via compile_aicpu_kernel() on first call."
+  ],
+  "aicpu_metadata_kernel": {
+    "files": [
+      "_prefix_attn_metadata_kernel_args.h",
+      "_prefix_attn_metadata_kernel_body.inc",
+      "_prefix_attn_metadata_kernel_kernel.aicpu",
+      "_prefix_attn_metadata_kernel_shim.asc",
+      "_prefix_attn_metadata_kernel_x86.cpp"
+    ],
+    "launch_mode": "interface",
+    "npu_arch": "dav-3510",
+    "verified": "byte-identical to compile_aicpu_kernel() workdir output; .so links successfully"
+  }
+}

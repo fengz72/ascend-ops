@@ -1,0 +1,10 @@
+#include "aicpu_api.h"
+#include "_prefix_attn_metadata_kernel_args.h"
+#include "_prefix_attn_metadata_kernel_body.inc"
+__global__ __aicpu__ uint32_t _prefix_attn_metadata_kernel(_PrefixAttnMetadataArgs a)
+{
+    g_arena_off = 0;
+    int64_t st = _prefix_attn_metadata_kernel_body(&a);
+    AscendC::DataStoreBarrier();
+    return (uint32_t)st;
+}
