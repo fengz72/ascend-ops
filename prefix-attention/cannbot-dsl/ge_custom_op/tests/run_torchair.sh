@@ -1,6 +1,6 @@
 #!/bin/bash
 # torchair end-to-end: small attention-block network compiled onto the GE
-# custom op PrefixAttnDn, compared against the eager DSL path.
+# custom op PrefixAttention, compared against the eager DSL path.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 GE_DIR=$(dirname "$HERE")
@@ -12,7 +12,7 @@ if [ ! -f "$GE_DIR/opp/op_graph/lib/linux/aarch64/libcust_opapi.so" ]; then
   cmake --build "$BUILD" -j"$(nproc)" > /dev/null
   cmake --install "$BUILD" > /dev/null
 fi
-if [ ! -f "$GE_DIR/opp/op_graph/lib/linux/aarch64/artifacts/dn_fp16.so" ]; then
+if [ ! -f "$GE_DIR/opp/op_graph/lib/linux/aarch64/artifacts/kernel_fp16.so" ]; then
   echo "[ERROR] artifacts missing; run: python scripts/export_artifacts.py" >&2
   exit 1
 fi

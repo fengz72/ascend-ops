@@ -88,7 +88,7 @@ for (int64_t _qh = 0; _qh < (n1); _qh += 1) {
     for (int64_t qt = 0; qt < (ptiles); qt += 1) {
         rows = ((128 < ((p) - ((qt) * 128)) ? 128 : ((p) - ((qt) * 128))));
         ctx.costs.data[(int64_t)(wi)] = (int64_t)(((qt) + 1) * ((rows) + 32));
-        if ((((int64_t)a->dn_cost) != 0)) {
+        if ((((int64_t)a->macro_cost) != 0)) {
             ctx.costs.data[(int64_t)(wi)] = (int64_t)(((qt) + 1) * (128 + 32));
         }
         wi = ((wi) + 1);
@@ -102,7 +102,7 @@ for (int64_t b = 0; b < (B); b += 1) {
         for (int64_t qt = 0; qt < (bl); qt += 1) {
             rows = ((128 < ((length) - ((qt) * 128)) ? 128 : ((length) - ((qt) * 128))));
             ctx.costs.data[(int64_t)(wi)] = (int64_t)((((ptiles) + (qt)) + 1) * ((rows) + 32));
-            if ((((int64_t)a->dn_cost) != 0)) {
+            if ((((int64_t)a->macro_cost) != 0)) {
                 visible = (((((p) + ((qt) * 128)) + (rows)) / 128 + (((((p) + ((qt) * 128)) + (rows)) % 128) != 0)));
                 ctx.costs.data[(int64_t)(wi)] = (int64_t)((visible) * (128 + 32));
             }
@@ -120,7 +120,7 @@ for (int64_t i = 0; i < (total); i += 1) {
     ctx.pref.data[(int64_t)((i) + 1)] = (int64_t)(((int64_t)ctx.pref.data[(int64_t)(i)]) + ((int64_t)ctx.costs.data[(int64_t)(i)]));
 }
 owner_limit = ((int64_t)a->aic_core_num);
-if ((((((int64_t)a->dn_cost) != 0) && (((owner_limit) > 1) != 0)) != 0)) {
+if ((((((int64_t)a->macro_cost) != 0) && (((owner_limit) > 1) != 0)) != 0)) {
     owner_limit = ((owner_limit) - 1);
 }
 nowners = (((owner_limit) < (total) ? (owner_limit) : (total)));

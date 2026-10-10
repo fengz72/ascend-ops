@@ -1,4 +1,4 @@
-"""Minimal NPU functional tests for prefix_attn_dn.
+"""Minimal NPU functional tests for prefix_attention.
 
 Four cases against an independent fp64 golden (dedup prefix-in-Q causal
 semantics): one single-batch smoke shape, one GQA multi-batch shape, and the
@@ -10,7 +10,7 @@ import math
 import pytest
 import torch
 
-from prefix_attn import prefix_attn_dn
+from prefix_attn import prefix_attention
 
 D = 64
 
@@ -61,7 +61,7 @@ CASES = [
 
 @pytest.mark.parametrize("bounds,n1,n2,dtype,seed",
                          [c[1:] for c in CASES], ids=[c[0] for c in CASES])
-def test_prefix_attn_dn(bounds, n1, n2, dtype, seed):
+def test_prefix_attention(bounds, n1, n2, dtype, seed):
     pytest.importorskip("torch_npu")
     if not torch.npu.is_available():
         pytest.skip("NPU is unavailable")
@@ -71,7 +71,7 @@ def test_prefix_attn_dn(bounds, n1, n2, dtype, seed):
     k = torch.randn((t, n2, D), generator=gen).to(dtype)
     v = torch.randn((t, n2, D), generator=gen).to(dtype)
     ref = golden_f64(q, k, v, bounds, 1 / math.sqrt(D))
-    got = prefix_attn_dn(q.npu(), k.npu(), v.npu(),
+    got = prefix_attention(q.npu(), k.npu(), v.npu(),
                          torch.tensor(bounds, dtype=torch.int32,
                                       device="npu")).cpu().double()
     assert torch.isfinite(got).all()

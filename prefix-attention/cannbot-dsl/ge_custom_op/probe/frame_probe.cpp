@@ -118,7 +118,7 @@ int main(int argc, char **argv) {
   int aic = prefix_attn::QueryAicCores();
   printf("aic_cores=%d (python used %s)\n", aic, meta["AIC"].c_str());
 
-  prefix_attn::DnLaunchParams p{};
+  prefix_attn::LaunchParams p{};
   p.out = dout; p.query = dq; p.key = dk; p.value = dv;
   p.total_tokens = T; p.n1 = n1; p.n2 = n2;
   p.bounds = db; p.bounds_len = bounds_len;

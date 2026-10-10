@@ -1,7 +1,7 @@
 """Host-side input validation for the prefix-in-Q attention contract.
 
-Extracted verbatim from the prefix_attn reference implementation so the DN
-kernel package stays self-contained (no ND kernel dependency).
+Extracted verbatim from the prefix_attn reference implementation so the
+kernel package stays self-contained.
 """
 
 import torch

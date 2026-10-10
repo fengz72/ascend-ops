@@ -7,5 +7,5 @@ struct _PrefixAttnMetadataArgs {
     uint32_t num_heads_q;
     uint32_t num_heads_kv;
     uint32_t aic_core_num;
-    uint32_t dn_cost;
+    uint32_t macro_cost;
 };

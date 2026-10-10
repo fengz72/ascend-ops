@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the GE custom op, stage the ES python wrapper, and run the online
-# GE Session end-to-end test (single PrefixAttnDn node vs python reference).
+# GE Session end-to-end test (single PrefixAttention node vs python reference).
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 GE_DIR=$(dirname "$HERE")
@@ -30,4 +30,4 @@ export ASCEND_CUSTOM_OPP_PATH="$GE_DIR/opp${ASCEND_CUSTOM_OPP_PATH:+:${ASCEND_CU
 echo "[INFO] run GE online session (ASCEND_CUSTOM_OPP_PATH=$GE_DIR/opp)"
 python "$HERE/run_ge_session.py" 2>&1 | tee "$BUILD/ge_session.log" | tail -5
 grep -Fq "GE_SESSION_PASS" "$BUILD/ge_session.log"
-echo "[INFO] PrefixAttnDn GE custom op online sample PASS"
+echo "[INFO] PrefixAttention GE custom op online sample PASS"

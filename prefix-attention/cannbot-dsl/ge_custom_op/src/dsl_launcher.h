@@ -1,6 +1,6 @@
 // Schema-driven launcher for the prebuilt cannbotdsl artifacts.
 //
-// Host ABI v9 (self-describing): each DN artifact .so exports
+// Host ABI v9 (self-describing): each kernel artifact .so exports
 //   <base>__cannbot_schema_v2() -> const CannBotHostSchemaV2*
 //   <base>__cannbot_invoke_v9(aclrtStream, const void* frame, uint64_t bytes)
 // The schema carries frame size/alignment, contract digest and per-slot
@@ -12,7 +12,7 @@
 
 namespace prefix_attn {
 
-struct DnLaunchParams {
+struct LaunchParams {
   void *out;             // device addr, [T, N1, 64], same dtype as query
   void *query;           // device addr, [T, N1, 64] fp16/bf16
   void *key;             // device addr, [T, N2, 64]
@@ -30,7 +30,7 @@ struct DnLaunchParams {
 };
 
 // dlopen the three artifact .so files (idempotent).  Directory resolution:
-// $PREFIX_ATTN_DN_ARTIFACTS, else <dir of this .so>/artifacts, else
+// $PREFIX_ATTN_ARTIFACTS, else <dir of this .so>/artifacts, else
 // <dir of this .so> (probe builds sit next to the artifacts).
 // Returns 0 on success, non-zero error code otherwise (see LauncherError).
 int LauncherInit();
@@ -41,9 +41,9 @@ int QueryAicCores();
 
 // Launch sequence (both async on params.stream, order guaranteed):
 //   1. AICPU metadata planner into params.metadata
-//   2. DN macro attention kernel via invoke_v9
+//   2. macro attention kernel via invoke_v9
 // Returns 0 on success; positive values are invoke_v9 status codes.
-int LauncherRun(const DnLaunchParams &params);
+int LauncherRun(const LaunchParams &params);
 
 // Last error message (thread-local).
 const char *LauncherError();

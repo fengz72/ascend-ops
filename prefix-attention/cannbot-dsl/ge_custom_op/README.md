@@ -1,8 +1,8 @@
-# PrefixAttnDn — GE 自定义算子(custom_op_v2,形态1)
+# PrefixAttention — GE 自定义算子(custom_op_v2,形态1)
 
-把 cannbot-dsl DN 实现接入 GE 图:单个算子节点 `PrefixAttnDn`,其
+把 cannbot-dsl 实现接入 GE 图:单个算子节点 `PrefixAttention`,其
 `Execute()` 内部完成完整 host 编排(零初始化 metadata workspace → launch
-AICPU metadata planner → launch DN macro attention kernel),两次 launch 同
+AICPU metadata planner → launch macro attention kernel),两次 launch 同
 stream 串行,图上不可见第二个节点。kernel 为预编译的 cannbotdsl AOT 产物
 (dlopen 加载),GE 侧零 RTC。
 
@@ -11,7 +11,7 @@ stream 串行,图上不可见第二个节点。kernel 为预编译的 cannbotdsl
 ## 算子原型
 
 ```cpp
-REG_OP(PrefixAttnDn)
+REG_OP(PrefixAttention)
     .INPUT(query,  TensorType({DT_FLOAT16, DT_BF16}))   // [T,N1,64] TND
     .INPUT(key,    TensorType({DT_FLOAT16, DT_BF16}))   // [T,N2,64]
     .INPUT(value,  TensorType({DT_FLOAT16, DT_BF16}))
@@ -27,12 +27,12 @@ Execute 内 host 侧校验,无 D2H 同步)。
 
 | 路径 | 内容 |
 |---|---|
-| `include/prefix_attn_dn_op.h` | REG_OP proto(构图侧/ES 生成共用) |
-| `src/prefix_attn_dn_proto.cc` | InferShape/InferDataType + IMPL_OP 注册 |
-| `src/prefix_attn_dn_op.cpp` | `EagerExecuteOp::Execute` + `REG_AUTO_MAPPING_OP` |
+| `include/prefix_attention_op.h` | REG_OP proto(构图侧/ES 生成共用) |
+| `src/prefix_attention_proto.cc` | InferShape/InferDataType + IMPL_OP 注册 |
+| `src/prefix_attention_op.cpp` | `EagerExecuteOp::Execute` + `REG_AUTO_MAPPING_OP` |
 | `src/dsl_launcher.{h,cpp}` | schema 驱动的 ABI v9 frame 构造 + dlopen 双产物 launch |
 | `src/artifacts.h` | 生成:产物文件名/符号名/核数默认值(export 脚本产出) |
-| `scripts/export_artifacts.py` | 板上导出 DN fp16/bf16 AOT .so + AICPU .so + MANIFEST |
+| `scripts/export_artifacts.py` | 板上导出 kernel fp16/bf16 AOT .so + AICPU .so + MANIFEST |
 | `probe/` | P0 ABI 探针:C++ 独立 launch 与 python host 路径**逐位一致**(已 PASS) |
 | `opp/` | OPP 交付包(`ASCEND_CUSTOM_OPP_PATH` 指向此;`prefix_attn.torch_ops` import 时自动挂载) |
 | `tests/` | GE 在线 Session 端到端 + torchair 小网络下沉测试 |
@@ -42,7 +42,7 @@ PyTorch 前端(torch.ops 注册 + torchair converter)在包内
 
 ## 关键机制:host ABI v9 frame
 
-DN 产物 .so 自描述(`codegen/launch_prefix_macro_dn.asc` 尾部同款):
+kernel 产物 .so 自描述(`codegen/launch_prefix_macro.asc` 尾部同款):
 
 - `<base>__cannbot_schema_v2()` → `CannBotHostSchemaV2*`:frame_bytes/alignment、
   contract_digest、每 slot 的 offset/pointer_offset/shape_offset/stride_offset
@@ -51,9 +51,9 @@ DN 产物 .so 自描述(`codegen/launch_prefix_macro_dn.asc` 尾部同款):
 
 `dsl_launcher.cpp` 完全按 schema 填 frame(不硬编码布局),8 个 slot 依次为
 out/query/key/value/scale/bounds/metadata/block_dim。AICPU 产物走扁平 C ABI
-`_prefix_attn_metadata_kernel_do(stream, bounds, metadata, len, n1, n2, aic, dn_cost)`。
+`_prefix_attn_metadata_kernel_do(stream, bounds, metadata, len, n1, n2, aic, macro_cost)`。
 核数 = min(导出时设备 AIC 数, 36),`PREFIX_ATTN_AIC_CORES` 可收窄,metadata
-参数与 DN block_dim 同源保证一致。
+参数与 macro kernel block_dim 同源保证一致。
 
 ## 构建与验证
 
@@ -80,27 +80,27 @@ bash tests/run_torchair.sh       # 期望 TORCHAIR_NET_PASS
 
 ```python
 import torch, torch_npu
-import prefix_attn.torch_ops   # 注册 torch.ops.prefix_attn.dn + 自动挂载 OPP
+import prefix_attn.torch_ops   # 注册 torch.ops.prefix_attention.forward + 自动挂载 OPP
                                # + 注册 torchair FX→GE converter
 
 # eager 直接用(PrivateUse1 → DSL python host 路径)
-out = torch.ops.prefix_attn.dn(q, k, v, bounds, 0.125)
+out = torch.ops.prefix_attention.forward(q, k, v, bounds, 0.125)
 
-# 图模式:模型 forward 里调 torch.ops.prefix_attn.dn,然后
+# 图模式:模型 forward 里调 torch.ops.prefix_attention.forward,然后
 from torch_npu.dynamo import torchair
 compiled = torch.compile(model, backend=torchair.get_npu_backend())
-out = compiled(x, bounds)   # 下沉到 GE PrefixAttnDn(C++ Execute,dlopen 产物)
+out = compiled(x, bounds)   # 下沉到 GE PrefixAttention(C++ Execute,dlopen 产物)
 ```
 
 `prefix_attn.torch_ops` import 时自动把本目录 `opp/` 挂到
-`ASCEND_CUSTOM_OPP_PATH`(可用 `PREFIX_ATTN_DN_OPP` 覆盖),无需手动 export。
+`ASCEND_CUSTOM_OPP_PATH`(可用 `PREFIX_ATTN_OPP` 覆盖),无需手动 export。
 
 下沉验证(test_torchair_net.py):编译前把 python host 路径替换为 raise——
 若发生 graph break 回退 eager 必然报错;实测通过且与 eager 输出逐位一致,
-证明网络真实下沉到 GE `PrefixAttnDn` 节点(C++ Execute,dlopen 产物)。
+证明网络真实下沉到 GE `PrefixAttention` 节点(C++ Execute,dlopen 产物)。
 
 msprof 确认图内每次 Execute 产生两个 task:
-`AI_CPU _prefix_attn_metadata_kernel` + `MIX_AIC kernel__PrefixMacroKernelDn`(Block=32)。
+`AI_CPU _prefix_attn_metadata_kernel` + `MIX_AIC kernel__PrefixMacroKernel`(Block=32)。
 
 ## 部署
 

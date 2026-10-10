@@ -1,18 +1,18 @@
 #!/bin/bash
-# One-shot installer for the prefix_attn DN operator (per board).
+# One-shot installer for the prefix_attention operator (per board).
 #
 #   bash scripts/install.sh
 #
 # Steps (idempotent):
-#   1. export kernel artifacts (DN fp16/bf16 AOT .so + AICPU .so)  [needs NPU]
+#   1. export kernel artifacts (kernel fp16/bf16 AOT .so + AICPU .so)  [needs NPU]
 #   2. build + install GE custom op deliverable (libcust_opapi.so -> opp/)
 #   3. pip install -e the prefix_attn package
-#   4. eager smoke test through torch.ops.prefix_attn.dn
+#   4. eager smoke test through torch.ops.prefix_attention.forward
 #
 # Afterwards, from any python:
 #   import torch, torch_npu
 #   import prefix_attn.torch_ops        # registers op + mounts OPP + converter
-#   out = torch.ops.prefix_attn.dn(q, k, v, bounds)
+#   out = torch.ops.prefix_attention.forward(q, k, v, bounds)
 #
 # Env overrides: ASCEND_HOME_PATH, PREFIX_ATTN_FORCE_EXPORT=1 (re-export
 # artifacts even if present), PREFIX_ATTN_AIC_CORES.
@@ -23,8 +23,8 @@ GE_DIR="$ROOT/ge_custom_op"
 ART_DIR="$GE_DIR/opp/op_graph/lib/linux/aarch64/artifacts"
 export ASCEND_HOME_PATH="${ASCEND_HOME_PATH:-/usr/local/Ascend/cann-9.2.0-beta.2}"
 
-echo "[1/4] kernel artifacts (DN fp16/bf16 + AICPU metadata)"
-if [ -f "$ART_DIR/dn_fp16.so" ] && [ -f "$ART_DIR/dn_bf16.so" ] \
+echo "[1/4] kernel artifacts (kernel fp16/bf16 + AICPU metadata)"
+if [ -f "$ART_DIR/kernel_fp16.so" ] && [ -f "$ART_DIR/kernel_bf16.so" ] \
    && [ -f "$ART_DIR/aicpu_metadata.so" ] && [ "${PREFIX_ATTN_FORCE_EXPORT:-0}" != "1" ]; then
   echo "  present, skipping (set PREFIX_ATTN_FORCE_EXPORT=1 to re-export)"
 else
@@ -42,7 +42,7 @@ echo "[3/4] pip install -e $ROOT"
 pip install -e "$ROOT" --no-deps -q
 echo "  done"
 
-echo "[4/4] eager smoke test (torch.ops.prefix_attn.dn)"
+echo "[4/4] eager smoke test (torch.ops.prefix_attention.forward)"
 python - <<'EOF'
 import torch
 import torch_npu  # noqa: F401
@@ -52,7 +52,7 @@ q = torch.randn(128, 1, 64, dtype=torch.float16).npu()
 k = torch.randn(128, 1, 64, dtype=torch.float16).npu()
 v = torch.randn(128, 1, 64, dtype=torch.float16).npu()
 b = torch.tensor([127, 128], dtype=torch.int32).npu()
-out = torch.ops.prefix_attn.dn(q, k, v, b)
+out = torch.ops.prefix_attention.forward(q, k, v, b)
 torch.npu.synchronize()
 assert out.shape == q.shape and out.dtype == q.dtype
 assert torch.isfinite(out.float()).all()
@@ -65,7 +65,7 @@ cat <<'USAGE'
 [DONE] 使用方式(任意 python):
   import torch, torch_npu
   import prefix_attn.torch_ops
-  out = torch.ops.prefix_attn.dn(q, k, v, bounds)        # eager
-  # 图模式: forward 内用 torch.ops.prefix_attn.dn,然后
+  out = torch.ops.prefix_attention.forward(q, k, v, bounds)        # eager
+  # 图模式: forward 内用 torch.ops.prefix_attention.forward,然后
   # torch.compile(model, backend=torchair.get_npu_backend())
 USAGE

@@ -1,7 +1,7 @@
-// PrefixAttnDn GE custom op (custom_op_v2, eager execute / scenario A).
+// PrefixAttention GE custom op (custom_op_v2, eager execute / scenario A).
 //
-// One graph node wraps the full DN host sequence: zero-init metadata
-// workspace -> AICPU metadata planner launch -> DN macro attention kernel
+// One graph node wraps the full host sequence: zero-init metadata
+// workspace -> AICPU metadata planner launch -> macro attention kernel
 // launch (schema-driven ABI v9 frame), both async on the GE execution
 // stream.  Kernels are the prebuilt cannbotdsl artifacts under
 // <this .so dir>/artifacts/ (see scripts/export_artifacts.py); the launcher
@@ -15,22 +15,22 @@
 
 #include "artifacts.h"
 #include "dsl_launcher.h"
-#include "prefix_attn_dn_op.h"
+#include "prefix_attention_op.h"
 
 namespace {
 
 constexpr int64_t kHeadDim = 64;
 constexpr size_t kMetadataBytes = PREFIX_ATTN_METADATA_ELEMS * sizeof(int32_t);
 
-#define PREFIX_ATTN_DN_FAIL(msg)                                        \
+#define PREFIX_ATTENTION_FAIL(msg)                                        \
   do {                                                                  \
-    std::cerr << "[PrefixAttnDn] " << msg << std::endl;                 \
+    std::cerr << "[PrefixAttention] " << msg << std::endl;                 \
     return ge::GRAPH_FAILED;                                            \
   } while (0)
 
 }  // namespace
 
-class PrefixAttnDn : public ge::EagerExecuteOp {
+class PrefixAttention : public ge::EagerExecuteOp {
  public:
   ge::graphStatus Execute(gert::EagerOpExecutionContext *ctx) override {
     const gert::Tensor *query = ctx->GetInputTensor(0);
@@ -39,7 +39,7 @@ class PrefixAttnDn : public ge::EagerExecuteOp {
     const gert::Tensor *bounds = ctx->GetInputTensor(3);
     if (query == nullptr || key == nullptr || value == nullptr ||
         bounds == nullptr) {
-      PREFIX_ATTN_DN_FAIL("null input tensor");
+      PREFIX_ATTENTION_FAIL("null input tensor");
     }
 
     // Contract mirror of prefix_attn/validate.py (host-side, no D2H).
@@ -49,10 +49,10 @@ class PrefixAttnDn : public ge::EagerExecuteOp {
     const gert::Shape &b_shape = bounds->GetShape().GetStorageShape();
     if (q_shape.GetDimNum() != 3 || k_shape.GetDimNum() != 3 ||
         v_shape.GetDimNum() != 3) {
-      PREFIX_ATTN_DN_FAIL("query/key/value must be rank-3 TND tensors");
+      PREFIX_ATTENTION_FAIL("query/key/value must be rank-3 TND tensors");
     }
     if (b_shape.GetDimNum() != 1 || b_shape.GetDim(0) < 2) {
-      PREFIX_ATTN_DN_FAIL("actual_seq_lengths must be 1-D [B+1], B>=1");
+      PREFIX_ATTENTION_FAIL("actual_seq_lengths must be 1-D [B+1], B>=1");
     }
     const int64_t total = q_shape.GetDim(0);
     const int64_t n1 = q_shape.GetDim(1);
@@ -60,22 +60,22 @@ class PrefixAttnDn : public ge::EagerExecuteOp {
     const int64_t n2 = k_shape.GetDim(1);
     if (head_dim != kHeadDim || k_shape.GetDim(2) != kHeadDim ||
         v_shape.GetDim(2) != kHeadDim) {
-      PREFIX_ATTN_DN_FAIL("only D=64 is supported");
+      PREFIX_ATTENTION_FAIL("only D=64 is supported");
     }
     if (k_shape.GetDim(0) != total || v_shape.GetDim(0) != total ||
         v_shape.GetDim(1) != n2) {
-      PREFIX_ATTN_DN_FAIL("Q/K/V must have matching T and equal K/V shapes");
+      PREFIX_ATTENTION_FAIL("Q/K/V must have matching T and equal K/V shapes");
     }
     if (n2 <= 0 || n1 < n2 || n1 % n2 != 0) {
-      PREFIX_ATTN_DN_FAIL("N1 must be a positive multiple of N2");
+      PREFIX_ATTENTION_FAIL("N1 must be a positive multiple of N2");
     }
     const ge::DataType q_dtype = query->GetDataType();
     if ((q_dtype != ge::DT_FLOAT16 && q_dtype != ge::DT_BF16) ||
         key->GetDataType() != q_dtype || value->GetDataType() != q_dtype) {
-      PREFIX_ATTN_DN_FAIL("query/key/value must all be fp16 or all bf16");
+      PREFIX_ATTENTION_FAIL("query/key/value must all be fp16 or all bf16");
     }
     if (bounds->GetDataType() != ge::DT_INT32) {
-      PREFIX_ATTN_DN_FAIL("actual_seq_lengths must be int32");
+      PREFIX_ATTENTION_FAIL("actual_seq_lengths must be int32");
     }
 
     float scale = 0.0F;
@@ -94,21 +94,21 @@ class PrefixAttnDn : public ge::EagerExecuteOp {
                                                    query->GetFormat(),
                                                    q_dtype);
     if (output == nullptr) {
-      PREFIX_ATTN_DN_FAIL("failed to malloc output tensor");
+      PREFIX_ATTENTION_FAIL("failed to malloc output tensor");
     }
     void *metadata = ctx->MallocWorkSpace(kMetadataBytes);
     if (metadata == nullptr) {
-      PREFIX_ATTN_DN_FAIL("failed to malloc metadata workspace");
+      PREFIX_ATTENTION_FAIL("failed to malloc metadata workspace");
     }
     aclrtStream stream = ctx->GetStream();
     // The planner assumes a zero-initialized buffer (torch.zeros on the
     // python side); keep the memset stream-ordered before the launches.
     if (aclrtMemsetAsync(metadata, kMetadataBytes, 0, kMetadataBytes,
                          stream) != ACL_SUCCESS) {
-      PREFIX_ATTN_DN_FAIL("aclrtMemsetAsync failed on metadata workspace");
+      PREFIX_ATTENTION_FAIL("aclrtMemsetAsync failed on metadata workspace");
     }
 
-    prefix_attn::DnLaunchParams params{};
+    prefix_attn::LaunchParams params{};
     params.out = output->GetAddr();
     params.query = const_cast<void *>(query->GetAddr());
     params.key = const_cast<void *>(key->GetAddr());
@@ -124,7 +124,7 @@ class PrefixAttnDn : public ge::EagerExecuteOp {
     params.bf16 = q_dtype == ge::DT_BF16;
     const int status = prefix_attn::LauncherRun(params);
     if (status != 0) {
-      std::cerr << "[PrefixAttnDn] launch failed: status=" << status
+      std::cerr << "[PrefixAttention] launch failed: status=" << status
                 << " err=" << prefix_attn::LauncherError() << std::endl;
       return ge::GRAPH_FAILED;
     }
@@ -132,4 +132,4 @@ class PrefixAttnDn : public ge::EagerExecuteOp {
   }
 };
 
-REG_AUTO_MAPPING_OP(PrefixAttnDn);
+REG_AUTO_MAPPING_OP(PrefixAttention);

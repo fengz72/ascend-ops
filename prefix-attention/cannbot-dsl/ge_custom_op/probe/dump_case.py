@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dump one DN case (inputs + python reference output) for the C++ frame probe.
+"""Dump one case (inputs + python reference output) for the C++ frame probe.
 
 Writes probe/case_data/{q,k,v,bounds,out_py}.bin + meta.txt (KEY VALUE lines).
 Case: focusu p20/130x10 fp16, seed 71000 (same as tests/production perf case).
@@ -14,7 +14,7 @@ sys.path.insert(0, str(DSL_ROOT))
 import torch
 import torch_npu  # noqa: F401
 
-from prefix_attn import prefix_attn_dn
+from prefix_attn import prefix_attention
 from prefix_attn.metadata import get_effective_core_counts
 
 
@@ -33,7 +33,7 @@ def main():
     k = torch.randn((t, n2, d), generator=gen).half()
     v = torch.randn((t, n2, d), generator=gen).half()
     bn = torch.tensor(bounds, dtype=torch.int32, device="npu")
-    out = prefix_attn_dn(q.npu(), k.npu(), v.npu(), bn)
+    out = prefix_attention(q.npu(), k.npu(), v.npu(), bn)
     torch.npu.synchronize()
     aic, _ = get_effective_core_counts()
     (out_dir / "q.bin").write_bytes(q.numpy().tobytes())

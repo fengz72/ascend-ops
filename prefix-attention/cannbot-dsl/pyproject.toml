@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "prefix-attn-dn"
+name = "prefix-attention"
 version = "0.1.0"
-description = "prefix-in-Q attention DN kernel (cannbotdsl) with PyTorch/GE integration"
+description = "prefix-in-Q attention attention kernel (cannbotdsl) with PyTorch/GE integration"
 requires-python = ">=3.10"
 
 [tool.setuptools]

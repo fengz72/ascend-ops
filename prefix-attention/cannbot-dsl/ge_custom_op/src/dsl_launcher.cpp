@@ -1,6 +1,6 @@
 // Implementation of the schema-driven DSL artifact launcher.  The host ABI
 // structs below mirror the definitions embedded in the cannbotdsl codegen
-// dump (codegen/launch_prefix_macro_dn.asc, host ABI v9 / schema v2) and are
+// dump (codegen/launch_prefix_macro.asc, host ABI v9 / schema v2) and are
 // validated against the artifact's own schema entry at init.
 #include "dsl_launcher.h"
 
@@ -80,15 +80,15 @@ typedef int32_t (*InvokeV9Fn)(void *stream, const void *frame, uint64_t bytes);
 typedef void (*AicpuDoFn)(void *stream, uint64_t bounds, uint64_t metadata,
                           uint32_t bounds_len, uint32_t num_heads_q,
                           uint32_t num_heads_kv, uint32_t aic_core_num,
-                          uint32_t dn_cost);
+                          uint32_t macro_cost);
 
 thread_local std::string g_error;
 
 void SetError(const std::string &msg) { g_error = msg; }
 
 struct Artifacts {
-  void *dn_fp16 = nullptr;
-  void *dn_bf16 = nullptr;
+  void *kernel_fp16 = nullptr;
+  void *kernel_bf16 = nullptr;
   void *aicpu = nullptr;
   const SchemaV2 *schema_fp16 = nullptr;
   const SchemaV2 *schema_bf16 = nullptr;
@@ -144,7 +144,7 @@ int ValidateSchema(const SchemaV2 *schema, const char *tag) {
     SetError(std::string(tag) + ": expected 8 slots");
     return 1;
   }
-  // Slot contract of _launch_prefix_macro_dn(out, query, key, value, scale,
+  // Slot contract of _launch_prefix_macro(out, query, key, value, scale,
   // bounds, metadata, block_dim): tensors [3d,3d,3d,3d,-,1d,1d,-].
   const uint32_t expect_kind[8] = {kSlotKindTensor, kSlotKindTensor, kSlotKindTensor,
                                    kSlotKindTensor, kSlotKindScalar, kSlotKindTensor,
@@ -185,40 +185,40 @@ int QueryAicCoresLocked() {
 
 void InitOnce() {
   std::string dir = ".";
-  const char *env_dir = getenv("PREFIX_ATTN_DN_ARTIFACTS");
+  const char *env_dir = getenv("PREFIX_ATTN_ARTIFACTS");
   if (env_dir != nullptr && env_dir[0] != '\0') {
     dir = env_dir;
   } else {
     std::string self = DirOfThisLibrary();
     // OPP layout: artifacts/ sits next to this .so; probe layout: same dir.
     dir = self + "/artifacts";
-    if (access((dir + "/" + PREFIX_ATTN_DN_SO_FP16).c_str(), R_OK) != 0) {
+    if (access((dir + "/" + PREFIX_ATTN_SO_FP16).c_str(), R_OK) != 0) {
       dir = self;
     }
   }
-  g_art.dn_fp16 = OpenArtifact(dir, PREFIX_ATTN_DN_SO_FP16);
-  if (g_art.dn_fp16 == nullptr) { g_init_status = 1; return; }
-  g_art.dn_bf16 = OpenArtifact(dir, PREFIX_ATTN_DN_SO_BF16);
-  if (g_art.dn_bf16 == nullptr) { g_init_status = 1; return; }
+  g_art.kernel_fp16 = OpenArtifact(dir, PREFIX_ATTN_SO_FP16);
+  if (g_art.kernel_fp16 == nullptr) { g_init_status = 1; return; }
+  g_art.kernel_bf16 = OpenArtifact(dir, PREFIX_ATTN_SO_BF16);
+  if (g_art.kernel_bf16 == nullptr) { g_init_status = 1; return; }
   g_art.aicpu = OpenArtifact(dir, PREFIX_ATTN_AICPU_SO);
   if (g_art.aicpu == nullptr) { g_init_status = 1; return; }
 
   auto schema_fp16 = reinterpret_cast<SchemaFn>(
-      Resolve(g_art.dn_fp16, PREFIX_ATTN_DN_SCHEMA_FP16));
+      Resolve(g_art.kernel_fp16, PREFIX_ATTN_SCHEMA_FP16));
   auto schema_bf16 = reinterpret_cast<SchemaFn>(
-      Resolve(g_art.dn_bf16, PREFIX_ATTN_DN_SCHEMA_BF16));
+      Resolve(g_art.kernel_bf16, PREFIX_ATTN_SCHEMA_BF16));
   if (schema_fp16 == nullptr || schema_bf16 == nullptr) { g_init_status = 1; return; }
   g_art.schema_fp16 = schema_fp16();
   g_art.schema_bf16 = schema_bf16();
-  if (ValidateSchema(g_art.schema_fp16, "dn_fp16") != 0 ||
-      ValidateSchema(g_art.schema_bf16, "dn_bf16") != 0) {
+  if (ValidateSchema(g_art.schema_fp16, "kernel_fp16") != 0 ||
+      ValidateSchema(g_art.schema_bf16, "kernel_bf16") != 0) {
     g_init_status = 1;
     return;
   }
   g_art.invoke_fp16 = reinterpret_cast<InvokeV9Fn>(
-      Resolve(g_art.dn_fp16, PREFIX_ATTN_DN_INVOKE_FP16));
+      Resolve(g_art.kernel_fp16, PREFIX_ATTN_INVOKE_FP16));
   g_art.invoke_bf16 = reinterpret_cast<InvokeV9Fn>(
-      Resolve(g_art.dn_bf16, PREFIX_ATTN_DN_INVOKE_BF16));
+      Resolve(g_art.kernel_bf16, PREFIX_ATTN_INVOKE_BF16));
   g_art.aicpu_do = reinterpret_cast<AicpuDoFn>(
       Resolve(g_art.aicpu, PREFIX_ATTN_AICPU_LAUNCH));
   if (g_art.invoke_fp16 == nullptr || g_art.invoke_bf16 == nullptr ||
@@ -251,12 +251,12 @@ int QueryAicCores() {
   return g_art.aic_cores;
 }
 
-int LauncherRun(const DnLaunchParams &p) {
+int LauncherRun(const LaunchParams &p) {
   if (LauncherInit() != 0) return 1;
   if (p.out == nullptr || p.query == nullptr || p.key == nullptr ||
       p.value == nullptr || p.bounds == nullptr || p.metadata == nullptr ||
       p.stream == nullptr) {
-    SetError("null device pointer or stream in DnLaunchParams");
+    SetError("null device pointer or stream in LaunchParams");
     return 1;
   }
   const SchemaV2 *schema = p.bf16 ? g_art.schema_bf16 : g_art.schema_fp16;
@@ -267,7 +267,7 @@ int LauncherRun(const DnLaunchParams &p) {
                  reinterpret_cast<uint64_t>(p.metadata),
                  static_cast<uint32_t>(p.bounds_len),
                  static_cast<uint32_t>(p.n1), static_cast<uint32_t>(p.n2),
-                 static_cast<uint32_t>(g_art.aic_cores), /*dn_cost=*/1u);
+                 static_cast<uint32_t>(g_art.aic_cores), /*macro_cost=*/1u);
 
   // 2. Build the ABI v9 call frame per the artifact's own schema.
   uint64_t frame_bytes = schema->frame_bytes;

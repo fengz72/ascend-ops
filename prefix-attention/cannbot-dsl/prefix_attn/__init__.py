@@ -1,3 +1,3 @@
-from .dn import prefix_attn_dn
+from .attention import prefix_attention
 
-__all__ = ["prefix_attn_dn"]
+__all__ = ["prefix_attention"]

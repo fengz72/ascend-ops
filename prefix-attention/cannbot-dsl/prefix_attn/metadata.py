@@ -111,7 +111,7 @@ class _PrefixAttnMetadataArgs:
     num_heads_q: U32
     num_heads_kv: U32
     aic_core_num: U32
-    dn_cost: U32
+    macro_cost: U32
 
 
 @aicpu_kernel
@@ -147,7 +147,7 @@ def _prefix_attn_metadata_kernel(a: _PrefixAttnMetadataArgs):
         for qt in range(ptiles):
             rows = min(TILE, p - qt * TILE)
             ctx.costs[wi] = (qt + 1) * (rows + COST_FIXED_ROWS)
-            if a.dn_cost:
+            if a.macro_cost:
                 ctx.costs[wi] = (qt + 1) * (TILE + COST_FIXED_ROWS)
             wi += 1
     for b in range(B):
@@ -158,8 +158,8 @@ def _prefix_attn_metadata_kernel(a: _PrefixAttnMetadataArgs):
             for qt in range(bl):
                 rows = min(TILE, length - qt * TILE)
                 ctx.costs[wi] = (ptiles + qt + 1) * (rows + COST_FIXED_ROWS)
-                if a.dn_cost:
-                    # Match the merged DN cursor: prefix and private rows
+                if a.macro_cost:
+                    # Match the merged macro cursor: prefix and private rows
                     # share the boundary KV tile. Keep the same owner count
                     # and contiguous box ABI; change only the cost estimate.
                     visible = ceil_div(p + qt * TILE + rows, TILE)
@@ -170,11 +170,11 @@ def _prefix_attn_metadata_kernel(a: _PrefixAttnMetadataArgs):
     for i in range(total):
         ctx.pref[i + 1] = ctx.pref[i] + ctx.costs[i]
 
-    # The DN delay line is sensitive to a one- or two-item final owner when
+    # The macro delay line is sensitive to a one- or two-item final owner when
     # a partial private tile is present.  Keep the launch at the requested
-    # block count, but reserve one block for that tail in the DN planner.
+    # block count, but reserve one block for that tail in the macro planner.
     owner_limit = a.aic_core_num
-    if a.dn_cost and owner_limit > 1:
+    if a.macro_cost and owner_limit > 1:
         owner_limit = owner_limit - 1
     nowners = min(owner_limit, total)
 
@@ -315,10 +315,10 @@ def _compiled_metadata():
     return directory, compiled
 
 
-def prefix_attn_metadata(bounds, num_heads_q, num_heads_kv, *, dn_cost=False):
+def prefix_attn_metadata(bounds, num_heads_q, num_heads_kv, *, macro_cost=False):
     """Generate compact-range metadata on AICPU using the current NPU stream.
 
-    ``dn_cost`` selects the padded-tile cost model used by the DN pipeline;
+    ``macro_cost`` selects the padded-tile cost model of the macro pipeline;
     the default keeps the planner contract used by the ND path.
     """
     import torch
@@ -352,7 +352,7 @@ def prefix_attn_metadata(bounds, num_heads_q, num_heads_kv, *, dn_cost=False):
         num_heads_q=num_heads_q,
         num_heads_kv=num_heads_kv,
         aic_core_num=aic,
-        dn_cost=int(dn_cost),
+        macro_cost=int(macro_cost),
     )
     bounds.record_stream(stream)
     return metadata

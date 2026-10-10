@@ -15,4 +15,4 @@ g++ -std=c++17 -O2 -Wall \
     frame_probe.cpp "$GE_DIR/src/dsl_launcher.cpp" \
     -L"$ASCEND/lib64" -lascendcl -ldl \
     -o frame_probe
-PREFIX_ATTN_DN_ARTIFACTS="$ARTIFACTS" ./frame_probe case_data
+PREFIX_ATTN_ARTIFACTS="$ARTIFACTS" ./frame_probe case_data

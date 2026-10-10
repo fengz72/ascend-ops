@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""GE online Session end-to-end test for the PrefixAttnDn custom op.
+"""GE online Session end-to-end test for the PrefixAttention custom op.
 
-Builds a single-op graph (4 inputs -> PrefixAttnDn -> 1 output) with the
+Builds a single-op graph (4 inputs -> PrefixAttention -> 1 output) with the
 generated ES wrapper, runs it on the NPU through ge.Session, and compares
 against the python host-path reference output dumped by probe/dump_case.py
 (same kernels, same inputs -> expected bit-exact).
@@ -40,7 +40,7 @@ def read_meta():
 
 
 def build_graph(meta):
-    from es_prefix_attn import PrefixAttnDn
+    from es_prefix_attn import PrefixAttention
 
     t = int(meta["T"])
     n1 = int(meta["N1"])
@@ -48,7 +48,7 @@ def build_graph(meta):
     blen = int(meta["BOUNDS_LEN"])
     dtype = (DataType.DT_BF16 if meta["DTYPE"] == "bfloat16"
              else DataType.DT_FLOAT16)
-    builder = GraphBuilder("prefix_attn_dn_graph")
+    builder = GraphBuilder("prefix_attention_graph")
     q = builder.create_input(index=0, name="query", data_type=dtype,
                              format=Format.FORMAT_ND, shape=[t, n1, 64])
     k = builder.create_input(index=1, name="key", data_type=dtype,
@@ -58,7 +58,7 @@ def build_graph(meta):
     b = builder.create_input(index=3, name="actual_seq_lengths",
                              data_type=DataType.DT_INT32,
                              format=Format.FORMAT_ND, shape=[blen])
-    out = PrefixAttnDn(q, k, v, b, scale=float(meta["SCALE"]))
+    out = PrefixAttention(q, k, v, b, scale=float(meta["SCALE"]))
     out.set_shape([t, n1, 64]).set_format(Format.FORMAT_ND).set_data_type(dtype)
     builder.set_graph_output(out, 0)
     return builder.build_and_reset()

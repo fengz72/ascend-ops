@@ -2,12 +2,12 @@
 // Artifact file names and symbol names of the prebuilt DSL kernels.
 #pragma once
 
-#define PREFIX_ATTN_DN_SO_FP16   "dn_fp16.so"
-#define PREFIX_ATTN_DN_SO_BF16   "dn_bf16.so"
-#define PREFIX_ATTN_DN_INVOKE_FP16 "_launch_prefix_macro_dn_39f5b587f6db6b863d9b6a3611b3637c__cannbot_invoke_v9"
-#define PREFIX_ATTN_DN_INVOKE_BF16 "_launch_prefix_macro_dn_e70d03347e8c06fbc47a470ea567813f__cannbot_invoke_v9"
-#define PREFIX_ATTN_DN_SCHEMA_FP16 "_launch_prefix_macro_dn_39f5b587f6db6b863d9b6a3611b3637c__cannbot_schema_v2"
-#define PREFIX_ATTN_DN_SCHEMA_BF16 "_launch_prefix_macro_dn_e70d03347e8c06fbc47a470ea567813f__cannbot_schema_v2"
+#define PREFIX_ATTN_SO_FP16   "kernel_fp16.so"
+#define PREFIX_ATTN_SO_BF16   "kernel_bf16.so"
+#define PREFIX_ATTN_INVOKE_FP16 "_launch_prefix_macro_39f5b587f6db6b863d9b6a3611b3637c__cannbot_invoke_v9"
+#define PREFIX_ATTN_INVOKE_BF16 "_launch_prefix_macro_e70d03347e8c06fbc47a470ea567813f__cannbot_invoke_v9"
+#define PREFIX_ATTN_SCHEMA_FP16 "_launch_prefix_macro_39f5b587f6db6b863d9b6a3611b3637c__cannbot_schema_v2"
+#define PREFIX_ATTN_SCHEMA_BF16 "_launch_prefix_macro_e70d03347e8c06fbc47a470ea567813f__cannbot_schema_v2"
 #define PREFIX_ATTN_AICPU_SO     "aicpu_metadata.so"
 #define PREFIX_ATTN_AICPU_LAUNCH "_prefix_attn_metadata_kernel_do"
 #define PREFIX_ATTN_METADATA_ELEMS 4096

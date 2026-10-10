@@ -1,8 +1,7 @@
-"""Prefix-in-Q attention, DN (K@Q^T) variant.
+"""Prefix-in-Q attention macro kernel (K@Q^T dataflow).
 
-Same host contract and work-item/metadata machinery as ``prefix_attn``
-(the ND production kernel); the cube/vector data path is rotated into the
-DN orientation validated by ``prob/probe_dn_bisect.py`` (V2):
+The cube/vector data path is organized in the K@Q^T orientation
+(validated on board):
 
   - MM1 computes S^T = K @ Q^T (l0a<-K, l0b<-Q); FIXPIPE uses an
     ``split_axis=1`` engine (dual destination), so each AIV slot receives
@@ -61,9 +60,9 @@ HEAD_DIM = 64
 
 
 @jit
-def _dn_pass_a(qk_ch, scale, sm_max, sm_exp, first, causal, row_base, p_len,
+def _pass_a(qk_ch, scale, sm_max, sm_exp, first, causal, row_base, p_len,
                kv_valid, full_visible=False):
-    """DN pass A: per-query max along KV, deferred scale, packed merge."""
+    """Pass A: per-query max along KV, deferred scale, packed merge."""
     with vf(mode="simd"):
         mask32 = rr.full_mask()
         neg = rr.vdups(-1.0e30, dtypes.float32, mask=mask32)
@@ -107,13 +106,13 @@ def _dn_pass_a(qk_ch, scale, sm_max, sm_exp, first, causal, row_base, p_len,
 
 
 @jit
-def _dn_pass_b(qk_ch, p_nz, scale, sm_max, sm_sum, sm_exp, first, causal,
+def _pass_b(qk_ch, p_nz, scale, sm_max, sm_sum, sm_exp, first, causal,
                row_base, p_len, kv_valid, is_fp16, full_visible=False):
-    """DN pass B: exp vs merged max, 4-chain sums, direct NZ P stores.
+    """Pass B: exp vs merged max, 4-chain sums, direct NZ P stores.
 
     The FIA kernel casts and writes the P tile in NZ order inside the same
     vector pass.  Do the same here instead of materializing an ND tile and
-    reading it back in a second ``_dn_pack_p`` pass.
+    reading it back in a second ``_pack_p`` pass.
     """
     with vf(mode="simd"):
         mask32 = rr.full_mask()
@@ -202,7 +201,7 @@ def _dn_pass_b(qk_ch, p_nz, scale, sm_max, sm_sum, sm_exp, first, causal,
 
 
 @jit
-def _dn_store_p(p_l1, p_ub, engine, subblock):
+def _store_p(p_l1, p_ub, engine, subblock):
     # Axis-1 split over the statically declared (128, 128) L1 P tile: the
     # full/actual extents are both static, so the engine's runtime plan is
     # inferred from the channel's declared shape.
@@ -210,7 +209,7 @@ def _dn_store_p(p_l1, p_ub, engine, subblock):
 
 
 @jit
-def _dn_native_row_tile(gm, head, token, rows, capacity, width):
+def _native_row_tile(gm, head, token, rows, capacity, width):
     """Drop the singleton head axis without packing the GM token stride."""
     span = gm[head, token:token + rows, 0:width]
     # A rank-2 tile selects the trailing axes and preserves their strides.
@@ -220,7 +219,7 @@ def _dn_native_row_tile(gm, head, token, rows, capacity, width):
 
 
 @jit
-def _dn_load_segments(slot, gm, head, base, valid, prefix_rows, private_base, engine):
+def _load_segments(slot, gm, head, base, valid, prefix_rows, private_base, engine):
     """Assemble K/V in one fixed NZ L1 frame, without UB or a merge API."""
     # PV consumes both 64-row halves. Zero the physical tail as well: a
     # masked probability of zero must not multiply stale NaN/Inf V data.
@@ -228,16 +227,16 @@ def _dn_load_segments(slot, gm, head, base, valid, prefix_rows, private_base, en
         cube_fill_l1_zero(slot, repeat=4, blk_num=128, dst_gap=0)
         cube_sync_pipe(PIPE.MTE2)
     if prefix_rows > 0:
-        prefix = _dn_native_row_tile(gm, head, base, prefix_rows, 128, 64)
+        prefix = _native_row_tile(gm, head, base, prefix_rows, 128, 64)
         mem_copy(slot[0:prefix_rows, None], prefix, engine=engine)
     if valid > prefix_rows:
-        private = _dn_native_row_tile(gm, head, private_base,
+        private = _native_row_tile(gm, head, private_base,
                                       valid - prefix_rows, 128, 64)
         mem_copy(slot[prefix_rows:valid, None], private, engine=engine)
 
 
 @jit
-def _dn_update(pv_ch, old_scale_buf, sum_buf, res_o, finalize):
+def _update(pv_ch, old_scale_buf, sum_buf, res_o, finalize):
     """``new_o = old_o*old_scale + tile_pv`` (optionally / sum)."""
     with vf(mode="simd"):
         for row in range(pv_ch.shape[0]):
@@ -253,7 +252,7 @@ def _dn_update(pv_ch, old_scale_buf, sum_buf, res_o, finalize):
 
 
 @jit
-def _dn_init_o(pv_ch, res_o):
+def _init_o(pv_ch, res_o):
     with vf(mode="simd"):
         for row in range(pv_ch.shape[0]):
             base = row * 64
@@ -262,7 +261,7 @@ def _dn_init_o(pv_ch, res_o):
 
 
 @jit
-def _dn_normalize_o(sum_buf, res_o, rows):
+def _normalize_o(sum_buf, res_o, rows):
     with vf(mode="simd"):
         for row in range(rows):
             denom = rr.vload_broadcast(sum_buf, row)
@@ -274,7 +273,7 @@ def _dn_normalize_o(sum_buf, res_o, rows):
 
 
 @jit
-def _dn_cast_o(o_ub, res_o, rows):
+def _cast_o(o_ub, res_o, rows):
     """Cast the live res_o rows into the dtype16 output channel slot.
 
     Mirrors the arena flash_attn ``_cast_nd_rows``: dynamic row count,
@@ -294,7 +293,7 @@ def _dn_cast_o(o_ub, res_o, rows):
 
 
 @jit
-def _dn_finish_o(pv, old_scale_buf, sum_buf, res_o, o_ub, rows, first):
+def _finish_o(pv, old_scale_buf, sum_buf, res_o, o_ub, rows, first):
     """Finish live rows directly into one selected output slot."""
     with vf(mode="simd"):
         mask, _ = rr.update_mask(64, elem_bits=32)
@@ -313,17 +312,17 @@ def _dn_finish_o(pv, old_scale_buf, sum_buf, res_o, o_ub, rows, first):
 
 
 @jit
-def _dn_write_output(out_gm, qhead, qstart, q_offset, live, res_o, o_ub):
+def _write_output(out_gm, qhead, qstart, q_offset, live, res_o, o_ub):
     # One AIV may have no live query rows; do not construct an empty GM view.
     if live > 0:
-        _dn_cast_o(o_ub, res_o, live)
-        o_tile = _dn_native_row_tile(out_gm, qhead, qstart + q_offset, live,
+        _cast_o(o_ub, res_o, live)
+        o_tile = _native_row_tile(out_gm, qhead, qstart + q_offset, live,
                                      64, 64)
         mem_copy(o_tile, reinterpret(o_ub, shape=(live, 64), stride=(64, 1)))
 
 
-class _DnMatmul:
-    """DN cube path: S^T = K@Q^T (dual-dst split-N) and O = P@V."""
+class _Matmul:
+    """Cube path: S^T = K@Q^T (dual-dst split-N) and O = P@V."""
 
     def __init__(self, dtype16):
         self.nd2nz = make_copy_engine(format_transform="nd2nz")
@@ -338,7 +337,7 @@ class _DnMatmul:
         # The QK's K view and the PV's transposed P^T view must not share an
         # L0A channel: the wheel's view unification then rewrites the QK
         # matmul's L0C destination as the (64,128) emit piece and the
-        # verifier rejects it (probe_dn_bisect V2 vs V5).
+        # verifier rejects it (observed on the 0.7.0 wheel).
         self.l0a_qk = Channel(MemLoc.L0A, (128, 64), dtype16, depth=2)
         # PV splits S2 in halves so its A operand fits a depth-2 channel: a
         # depth-1 (128,128) slot is released at MMAD issue time and the
@@ -396,7 +395,7 @@ class _DnMatmul:
         return o_l0c
 
 
-class _DnVector:
+class _Vector:
     """Packed online-softmax state and P staging for one vector half."""
 
     def __init__(self, dtype16):
@@ -409,8 +408,8 @@ class _DnVector:
 
 
 @kernel
-class _PrefixMacroKernelDn:
-    """Metadata-driven DN pipeline: one launch per core."""
+class _PrefixMacroKernel:
+    """Metadata-driven macro pipeline: one launch per core."""
 
     def __init__(self, dtype16=dtypes.float16):
         self.is_fp16 = dtype16 == dtypes.float16
@@ -433,8 +432,8 @@ class _PrefixMacroKernelDn:
             MemLoc.UB, (64, 64), dtypes.float32, depth=2,
             kind=ChannelKind.CrossCore,
         )
-        self.matmul = _DnMatmul(dtype16)
-        self.vector = _DnVector(dtype16)
+        self.matmul = _Matmul(dtype16)
+        self.vector = _Vector(dtype16)
         # Packed state per in-flight work item (m_seq % 3): lane == query.
         self.max_slots = [
             Buffer(MemLoc.UB, (64, 1), dtypes.float32)
@@ -458,7 +457,7 @@ class _PrefixMacroKernelDn:
     @jit
     def _stage_qk(self, key, kv_head, base, valid, prefix_rows, private_base):
         slot = self.matmul.k_l1.produce()
-        _dn_load_segments(slot, key, kv_head, base, valid, prefix_rows,
+        _load_segments(slot, key, kv_head, base, valid, prefix_rows,
                           private_base, self.matmul.nd2nz)
         result = self.matmul.qk()
         # Static axis-1 dual-dst emit over the full (128, 128) S^T view:
@@ -480,37 +479,37 @@ class _PrefixMacroKernelDn:
         full_visible = (valid >= 128 if causal_row0 >= 127 else False)
         if full_visible:
             if first:
-                _dn_pass_a(qk, scale, sm_max, sm_exp, True, 1,
+                _pass_a(qk, scale, sm_max, sm_exp, True, 1,
                            causal_row0, 0, kv_valid, True)
-                _dn_pass_b(qk, p_ub, scale, sm_max,
+                _pass_b(qk, p_ub, scale, sm_max,
                            sm_sum, sm_exp, True, 1, causal_row0, 0,
                            kv_valid, self.is_fp16, True)
             else:
-                _dn_pass_a(qk, scale, sm_max, sm_exp, False, 1,
+                _pass_a(qk, scale, sm_max, sm_exp, False, 1,
                            causal_row0, 0, kv_valid, True)
-                _dn_pass_b(qk, p_ub, scale, sm_max,
+                _pass_b(qk, p_ub, scale, sm_max,
                            sm_sum, sm_exp, False, 1, causal_row0, 0,
                            kv_valid, self.is_fp16, True)
         else:
             if first:
-                _dn_pass_a(qk, scale, sm_max, sm_exp, True, 1,
+                _pass_a(qk, scale, sm_max, sm_exp, True, 1,
                            causal_row0, 0, kv_valid)
-                _dn_pass_b(qk, p_ub, scale, sm_max,
+                _pass_b(qk, p_ub, scale, sm_max,
                            sm_sum, sm_exp, True, 1, causal_row0, 0,
                            kv_valid, self.is_fp16)
             else:
-                _dn_pass_a(qk, scale, sm_max, sm_exp, False, 1,
+                _pass_a(qk, scale, sm_max, sm_exp, False, 1,
                            causal_row0, 0, kv_valid)
-                _dn_pass_b(qk, p_ub, scale, sm_max,
+                _pass_b(qk, p_ub, scale, sm_max,
                            sm_sum, sm_exp, False, 1, causal_row0, 0,
                            kv_valid, self.is_fp16)
-        _dn_store_p(self.p_l1.produce(), p_ub, self.split_cols,
+        _store_p(self.p_l1.produce(), p_ub, self.split_cols,
                     self.subblock)
 
     @jit
     def _stage_pv(self, value, kvhead, base, valid, prefix_rows, private_base):
         slot = self.matmul.v_l1.produce()
-        _dn_load_segments(slot, value, kvhead, base, valid, prefix_rows,
+        _load_segments(slot, value, kvhead, base, valid, prefix_rows,
                           private_base, self.matmul.nd2nz)
         result = self.matmul.pv(self.p_l1.consume())
         # Static axis-0 dual-dst emit over the packed (128, 64) result
@@ -531,19 +530,19 @@ class _PrefixMacroKernelDn:
             # Keep the PV wait/free handoff even for an AIV with zero live rows.
             # The VF loop is empty in that case; only GM output is guarded.
             if first:
-                _dn_finish_o(pv, self.exp_slots[slot], self.sum_slots[mslot],
+                _finish_o(pv, self.exp_slots[slot], self.sum_slots[mslot],
                              self.vector.res_o, o_ub, live, True)
             else:
-                _dn_finish_o(pv, self.exp_slots[slot], self.sum_slots[mslot],
+                _finish_o(pv, self.exp_slots[slot], self.sum_slots[mslot],
                              self.vector.res_o, o_ub, live, False)
             if live > 0:
-                o_tile = _dn_native_row_tile(out, qhead, qstart + q_offset,
+                o_tile = _native_row_tile(out, qhead, qstart + q_offset,
                                              live, 64, 64)
                 mem_copy(o_tile, reinterpret(o_ub, shape=(live, 64), stride=(64, 1)))
         elif first:
-            _dn_init_o(pv, self.vector.res_o)
+            _init_o(pv, self.vector.res_o)
         else:
-            _dn_update(pv, self.exp_slots[slot], self.sum_slots[mslot],
+            _update(pv, self.exp_slots[slot], self.sum_slots[mslot],
                        self.vector.res_o, False)
 
     @jit
@@ -632,7 +631,7 @@ class _PrefixMacroKernelDn:
                     logical_length = (p if is_prefix else p + length_v)
                     ntiles = ceil_div(row0 + q_rows, 128)
                     kv_head = q_head // group
-                    q_tile_gm = _dn_native_row_tile(
+                    q_tile_gm = _native_row_tile(
                         query, q_head, q_start, q_rows, 128, 64
                     )
                     self.matmul.load_q(q_tile_gm)
@@ -657,34 +656,34 @@ class _PrefixMacroKernelDn:
 
 
 @host
-def _launch_prefix_macro_dn(out, query, key, value, scale, bounds, metadata,
+def _launch_prefix_macro(out, query, key, value, scale, bounds, metadata,
                             block_dim: int):
     qv = permute(query, (1, 0, 2))
     kv = permute(key, (1, 0, 2))
     vv = permute(value, (1, 0, 2))
     ov = permute(out, (1, 0, 2))
     if const_expr(query.dtype == dtypes.float16):
-        op = _PrefixMacroKernelDn(dtype16=dtypes.float16)
+        op = _PrefixMacroKernel(dtype16=dtypes.float16)
     else:
-        op = _PrefixMacroKernelDn(dtype16=dtypes.bfloat16)
+        op = _PrefixMacroKernel(dtype16=dtypes.bfloat16)
     op[block_dim](ov, qv, kv, vv, scale, bounds, metadata)
 
 
-_AOT_LAUNCH_CACHE_DN: dict = {}
+_AOT_LAUNCH_CACHE: dict = {}
 
 
-def _compiled_launch_dn(n1, n2, dtype16):
-    """Compile the DN macro launch once per (N1, N2, dtype) with dynamic T/B.
+def _compiled_launch(n1, n2, dtype16):
+    """Compile the macro launch once per (N1, N2, dtype) with dynamic T/B.
 
     All input lengths use bounded GM row views and zero-initialized fixed
     L1 frames, including T < 128; no legacy ND fallback is needed.
     """
     key = (n1, n2, dtype16)
-    compiled = _AOT_LAUNCH_CACHE_DN.get(key)
+    compiled = _AOT_LAUNCH_CACHE.get(key)
     if compiled is None:
         t_dim = Dim("T", min=1)
         bounds_dim = Dim("B1", min=2)
-        compiled = compile(_launch_prefix_macro_dn,
+        compiled = compile(_launch_prefix_macro,
             TensorSpec((t_dim, n1, HEAD_DIM), dtype16),
             TensorSpec((t_dim, n1, HEAD_DIM), dtype16),
             TensorSpec((t_dim, n2, HEAD_DIM), dtype16),
@@ -694,16 +693,16 @@ def _compiled_launch_dn(n1, n2, dtype16):
             TensorSpec((metadata_padded_count(),), dtypes.int32),
             int,
         )
-        _AOT_LAUNCH_CACHE_DN[key] = compiled
+        _AOT_LAUNCH_CACHE[key] = compiled
     return compiled
 
 
-def prefix_attn_dn(query, key, value, actual_seq_lengths,
+def prefix_attention(query, key, value, actual_seq_lengths,
                    scale=None):
-    """DN (K@Q^T) variant of :func:`prefix_attn` with the same contract."""
+    """Run prefix-in-Q causal attention on NPU (K@Q^T macro pipeline)."""
     _validate(query, key, value, actual_seq_lengths)
     if query.device.type != "npu":
-        raise ValueError("prefix_attn_dn requires NPU-resident Q/K/V tensors")
+        raise ValueError("prefix_attention requires NPU-resident Q/K/V tensors")
     scale = 1.0 / math.sqrt(query.shape[2]) if scale is None else float(scale)
     from .metadata import (
         get_effective_core_counts, prefix_attn_metadata,
@@ -713,17 +712,17 @@ def prefix_attn_dn(query, key, value, actual_seq_lengths,
         raise DesignError("DESIGN_ERROR: N1 must be divisible by N2")
     stream = torch.npu.current_stream(query.device.index or 0)
     aic, _ = get_effective_core_counts(stream=stream)
-    metadata = prefix_attn_metadata(actual_seq_lengths, n1, n2, dn_cost=True)
+    metadata = prefix_attn_metadata(actual_seq_lengths, n1, n2, macro_cost=True)
     out = torch.empty_like(query)
     bounds = actual_seq_lengths
     if (bounds.device.type != "npu" or bounds.dtype != torch.int32
             or not bounds.is_contiguous()):
         bounds = bounds.to(device="npu", dtype=torch.int32).contiguous()
     dtype16 = dtypes.float16 if query.dtype == torch.float16 else dtypes.bfloat16
-    _compiled_launch_dn(n1, n2, dtype16)(
+    _compiled_launch(n1, n2, dtype16)(
         out, query, key, value, float(scale), bounds, metadata, aic,
     )
     return out
 
 
-__all__ = ["prefix_attn_dn"]
+__all__ = ["prefix_attention"]
