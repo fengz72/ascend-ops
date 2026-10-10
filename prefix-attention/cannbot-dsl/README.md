@@ -22,6 +22,7 @@ out = prefix_attn_dn(q, k, v, actual_seq_lengths)          # scale 默认 1/sqrt
 | `prefix_attn/metadata.py` | AICPU compact-box metadata planner(每次调用先跑的小 kernel,为各 AIC 划分 work item) |
 | `prefix_attn/validate.py` | host 侧输入校验(契约见上;D!=64、N1<N2、非 contiguous 等直接 raise) |
 | `codegen/` | codegen 产物快照:`launch_prefix_macro_dn.asc` 为 DN kernel(float16 特化)的 AscendC 代码;`codegen/aicpu/` 为 metadata AICPU kernel 的生成源码(与 dtype 无关),再生成命令见下 |
+| `ge_custom_op/` | GE 自定义算子接入(custom_op_v2 形态1):单节点 `PrefixAttnDn`,Execute 内双 launch;含产物导出脚本、ABI 探针、OPP 包与 GE Session 端到端测试,详见其 README |
 | `tests/` | 最简 NPU 功能测试:fp64 golden,4 case(单 batch / GQA 多 batch / 两个生产 uniform shape) |
 
 ## 环境要求(实测基线)
