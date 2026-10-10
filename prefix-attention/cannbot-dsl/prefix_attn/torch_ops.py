@@ -4,12 +4,12 @@ wiring.  One import makes the operator usable in torch:
     import torch, torch_npu
     import prefix_attn.torch_ops            # <- this module
 
-    out = torch.ops.prefix_attention.forward(q, k, v, bounds)   # eager
+    out = torch.ops.ascendc_ops.prefix_attention(q, k, v, bounds)   # eager
     compiled = torch.compile(model, backend=torchair.get_npu_backend())
                                                                 # graph mode
 
 What happens at import:
-  1. torch.ops.prefix_attention.forward is defined (PrivateUse1 -> DSL
+  1. torch.ops.ascendc_ops.prefix_attention is defined (PrivateUse1 -> DSL
      python host path, Meta -> shape/dtype propagation).
   2. The bundled GE custom-op OPP package (PrefixAttention) is located and
      prepended to ASCEND_CUSTOM_OPP_PATH so GE/torchair can find it at
@@ -19,6 +19,12 @@ What happens at import:
 
 Eager mode needs nothing else.  Graph (torchair) mode additionally needs
 the GE deliverables built: run scripts/install.sh once per board.
+
+Namespace note: the op is registered as ascendc_ops::prefix_attention (the
+GE deliverable executes the codegen'd AscendC artifacts).  A torch library
+namespace can only be DEF-registered once per process: do not load another
+extension that also DEFs "ascendc_ops" (e.g. bindings derived from the GE
+custom-op examples) in the same process.
 """
 import os
 from pathlib import Path
@@ -28,13 +34,13 @@ import torch
 _PKG_DIR = Path(__file__).resolve().parent
 
 torch.library.define(
-    "prefix_attention::forward",
+    "ascendc_ops::prefix_attention",
     "(Tensor query, Tensor key, Tensor value, Tensor actual_seq_lengths, "
     "float scale=0.0) -> Tensor",
 )
 
 
-@torch.library.impl("prefix_attention::forward", "PrivateUse1")
+@torch.library.impl("ascendc_ops::prefix_attention", "PrivateUse1")
 def _forward_privateuse1(query, key, value, actual_seq_lengths, scale=0.0):
     import prefix_attn
     return prefix_attn.prefix_attention(
@@ -42,7 +48,7 @@ def _forward_privateuse1(query, key, value, actual_seq_lengths, scale=0.0):
         scale=None if scale <= 0.0 else scale)
 
 
-@torch.library.impl("prefix_attention::forward", "Meta")
+@torch.library.impl("ascendc_ops::prefix_attention", "Meta")
 def _forward_meta(query, key, value, actual_seq_lengths, scale=0.0):
     return torch.empty_like(query)
 
@@ -98,7 +104,7 @@ def register_torchair_converter():
         return False
 
     @torchair.register_fx_node_ge_converter(
-            torch.ops.prefix_attention.forward.default)
+            torch.ops.ascendc_ops.prefix_attention.default)
     def _convert_prefix_attention(query, key, value, actual_seq_lengths,
                                   scale=0.0, meta_outputs=None):
         return ge_custom_op(

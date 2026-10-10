@@ -80,13 +80,13 @@ bash tests/run_torchair.sh       # 期望 TORCHAIR_NET_PASS
 
 ```python
 import torch, torch_npu
-import prefix_attn.torch_ops   # 注册 torch.ops.prefix_attention.forward + 自动挂载 OPP
+import prefix_attn.torch_ops   # 注册 torch.ops.ascendc_ops.prefix_attention + 自动挂载 OPP
                                # + 注册 torchair FX→GE converter
 
 # eager 直接用(PrivateUse1 → DSL python host 路径)
-out = torch.ops.prefix_attention.forward(q, k, v, bounds, 0.125)
+out = torch.ops.ascendc_ops.prefix_attention(q, k, v, bounds, 0.125)
 
-# 图模式:模型 forward 里调 torch.ops.prefix_attention.forward,然后
+# 图模式:模型 forward 里调 torch.ops.ascendc_ops.prefix_attention,然后
 from torch_npu.dynamo import torchair
 compiled = torch.compile(model, backend=torchair.get_npu_backend())
 out = compiled(x, bounds)   # 下沉到 GE PrefixAttention(C++ Execute,dlopen 产物)

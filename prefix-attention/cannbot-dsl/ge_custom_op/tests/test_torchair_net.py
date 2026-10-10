@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """torchair end-to-end test: a small attention block network using
-torch.ops.prefix_attention.forward, compiled (下沉) through torchair onto the GE
+torch.ops.ascendc_ops.prefix_attention, compiled (下沉) through torchair onto the GE
 custom op PrefixAttention, compared against the eager reference.
 
 Env (set by tests/run_torchair.sh):
@@ -16,7 +16,7 @@ HERE = Path(__file__).resolve().parent
 GE_DIR = HERE.parent
 sys.path.insert(0, str(GE_DIR.parent))  # cannbot-dsl root (prefix_attn pkg)
 
-# registers torch.ops.prefix_attention.forward + mounts OPP + torchair converter
+# registers torch.ops.ascendc_ops.prefix_attention + mounts OPP + torchair converter
 import prefix_attn.torch_ops  # noqa: E402,F401
 
 from torch_npu.dynamo import torchair  # noqa: E402
@@ -41,7 +41,7 @@ class AttnBlock(torch.nn.Module):
         q = qkv[:, : N1 * D].view(-1, N1, D).contiguous()
         k = qkv[:, N1 * D: (N1 + N2) * D].view(-1, N2, D).contiguous()
         v = qkv[:, (N1 + N2) * D:].view(-1, N2, D).contiguous()
-        attn = torch.ops.prefix_attention.forward(q, k, v, bounds, 0.125)
+        attn = torch.ops.ascendc_ops.prefix_attention(q, k, v, bounds, 0.125)
         return self.o(attn.view(-1, N1 * D))
 
 

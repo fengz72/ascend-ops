@@ -19,9 +19,9 @@ bash scripts/install.sh
 import torch, torch_npu
 import prefix_attn.torch_ops        # 注册 torch op + 自动挂载 OPP + torchair converter
 
-out = torch.ops.prefix_attention.forward(q, k, v, bounds)          # eager(scale 可选,0=1/sqrt(D))
+out = torch.ops.ascendc_ops.prefix_attention(q, k, v, bounds)          # eager(scale 可选,0=1/sqrt(D))
 
-# 图模式(下沉到 GE PrefixAttention C++ 节点):forward 里用 torch.ops.prefix_attention.forward
+# 图模式(下沉到 GE PrefixAttention C++ 节点):forward 里用 torch.ops.ascendc_ops.prefix_attention
 from torch_npu.dynamo import torchair                    # torch_npu 自带,无需另装
 compiled = torch.compile(model, backend=torchair.get_npu_backend())
 ```
@@ -43,7 +43,7 @@ out = prefix_attention(q, k, v, actual_seq_lengths)          # scale 默认 1/sq
 | `prefix_attn/attention.py` | macro kernel(cube/vector 数据通路为 K@Q^T 方向;`@host` 入口 + AOT compile 缓存,T/B 动态维) |
 | `prefix_attn/metadata.py` | AICPU compact-box metadata planner(每次调用先跑的小 kernel,为各 AIC 划分 work item) |
 | `prefix_attn/validate.py` | host 侧输入校验(契约见上;D!=64、N1<N2、非 contiguous 等直接 raise) |
-| `prefix_attn/torch_ops.py` | PyTorch 前端:torch.ops.prefix_attention.forward 注册(PrivateUse1/Meta)+ OPP 自动挂载 + torchair converter |
+| `prefix_attn/torch_ops.py` | PyTorch 前端:torch.ops.ascendc_ops.prefix_attention 注册(PrivateUse1/Meta)+ OPP 自动挂载 + torchair converter |
 | `scripts/install.sh` | 一键安装(产物导出 → GE 交付件构建 → pip install -e → 冒烟) |
 | `pyproject.toml` | 打包配置(prefix-attention) |
 | `codegen/` | codegen 产物快照:`launch_prefix_macro.asc` 为 macro kernel(float16 特化)的 AscendC 代码;`codegen/aicpu/` 为 metadata AICPU kernel 的生成源码(与 dtype 无关),再生成命令见下 |

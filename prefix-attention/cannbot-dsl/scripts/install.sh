@@ -7,12 +7,12 @@
 #   1. export kernel artifacts (kernel fp16/bf16 AOT .so + AICPU .so)  [needs NPU]
 #   2. build + install GE custom op deliverable (libcust_opapi.so -> opp/)
 #   3. pip install -e the prefix_attn package
-#   4. eager smoke test through torch.ops.prefix_attention.forward
+#   4. eager smoke test through torch.ops.ascendc_ops.prefix_attention
 #
 # Afterwards, from any python:
 #   import torch, torch_npu
 #   import prefix_attn.torch_ops        # registers op + mounts OPP + converter
-#   out = torch.ops.prefix_attention.forward(q, k, v, bounds)
+#   out = torch.ops.ascendc_ops.prefix_attention(q, k, v, bounds)
 #
 # Env overrides: ASCEND_HOME_PATH, PREFIX_ATTN_FORCE_EXPORT=1 (re-export
 # artifacts even if present), PREFIX_ATTN_AIC_CORES.
@@ -42,7 +42,7 @@ echo "[3/4] pip install -e $ROOT"
 pip install -e "$ROOT" --no-deps -q
 echo "  done"
 
-echo "[4/4] eager smoke test (torch.ops.prefix_attention.forward)"
+echo "[4/4] eager smoke test (torch.ops.ascendc_ops.prefix_attention)"
 python - <<'EOF'
 import torch
 import torch_npu  # noqa: F401
@@ -52,7 +52,7 @@ q = torch.randn(128, 1, 64, dtype=torch.float16).npu()
 k = torch.randn(128, 1, 64, dtype=torch.float16).npu()
 v = torch.randn(128, 1, 64, dtype=torch.float16).npu()
 b = torch.tensor([127, 128], dtype=torch.int32).npu()
-out = torch.ops.prefix_attention.forward(q, k, v, b)
+out = torch.ops.ascendc_ops.prefix_attention(q, k, v, b)
 torch.npu.synchronize()
 assert out.shape == q.shape and out.dtype == q.dtype
 assert torch.isfinite(out.float()).all()
@@ -65,7 +65,7 @@ cat <<'USAGE'
 [DONE] 使用方式(任意 python):
   import torch, torch_npu
   import prefix_attn.torch_ops
-  out = torch.ops.prefix_attention.forward(q, k, v, bounds)        # eager
-  # 图模式: forward 内用 torch.ops.prefix_attention.forward,然后
+  out = torch.ops.ascendc_ops.prefix_attention(q, k, v, bounds)        # eager
+  # 图模式: forward 内用 torch.ops.ascendc_ops.prefix_attention,然后
   # torch.compile(model, backend=torchair.get_npu_backend())
 USAGE
