@@ -35,7 +35,8 @@ Execute 内 host 侧校验,无 D2H 同步)。
 | `scripts/export_artifacts.py` | 板上导出 DN fp16/bf16 AOT .so + AICPU .so + MANIFEST |
 | `probe/` | P0 ABI 探针:C++ 独立 launch 与 python host 路径**逐位一致**(已 PASS) |
 | `opp/` | OPP 交付包(`ASCEND_CUSTOM_OPP_PATH` 指向此) |
-| `tests/` | GE 在线 Session 端到端(ES wrapper + GraphBuilder + golden 比对) |
+| `torch/` | PyTorch 前端:`ops.py`(torch.ops.prefix_attn.dn,PrivateUse1+Meta)、`converter.py`(torchair FX→GE 节点) |
+| `tests/` | GE 在线 Session 端到端 + torchair 小网络下沉测试 |
 
 ## 关键机制:host ABI v9 frame
 
@@ -65,7 +66,33 @@ bash probe/run_probe.sh          # 期望 PROBE_PASS (bit-exact)
 
 # 2) 构建 + OPP 安装 + ES wrapper 生成 + GE 在线 Session 端到端
 bash tests/run_online.sh         # 期望 GE_SESSION_PASS
+
+# 3) PyTorch/torchair 小网络下沉端到端
+bash tests/run_torchair.sh       # 期望 TORCHAIR_NET_PASS
 ```
+
+## PyTorch 中使用
+
+torchair 随 torch_npu 自带(`torch_npu.dynamo.torchair`,无需单独安装)。
+
+```python
+import torch, torch_npu
+import sys; sys.path.insert(0, "<...>/ge_custom_op/torch")
+import ops        # 注册 torch.ops.prefix_attn.dn(eager: PrivateUse1 → DSL python 路径)
+import converter  # 注册 torchair FX→GE converter(下沉: GE PrefixAttnDn C++ Execute)
+
+# eager 直接用
+out = torch.ops.prefix_attn.dn(q, k, v, bounds, 0.125)
+
+# 图模式:模型 forward 里调 torch.ops.prefix_attn.dn,然后
+from torch_npu.dynamo import torchair
+compiled = torch.compile(model, backend=torchair.get_npu_backend())
+out = compiled(x, bounds)   # 需 ASCEND_CUSTOM_OPP_PATH 指向 opp/
+```
+
+下沉验证(test_torchair_net.py):编译前把 python host 路径替换为 raise——
+若发生 graph break 回退 eager 必然报错;实测通过且与 eager 输出逐位一致,
+证明网络真实下沉到 GE `PrefixAttnDn` 节点(C++ Execute,dlopen 产物)。
 
 msprof 确认图内每次 Execute 产生两个 task:
 `AI_CPU _prefix_attn_metadata_kernel` + `MIX_AIC kernel__PrefixMacroKernelDn`(Block=32)。
@@ -86,5 +113,5 @@ export ASCEND_CUSTOM_OPP_PATH="<...>/ge_custom_op/opp:$ASCEND_CUSTOM_OPP_PATH"
 
 - [x] P0 ABI 探针(bit-exact PASS)
 - [x] P1 GE 在线 Session 端到端(PASS,msprof 双 kernel 确认)
-- [ ] P2 PyTorch/TorchAir 前端(TORCH_LIBRARY + converter;需安装 torchair)
+- [x] P2 PyTorch/TorchAir 前端(torch.ops + converter;小网络下沉 PASS,与 eager 逐位一致)
 - [ ] P3 OM 离线下沉(CompilableOp/PortableOp,参考 compilable_add_custom 样例)
