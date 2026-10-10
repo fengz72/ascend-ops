@@ -14,11 +14,10 @@ import torch_npu  # noqa: F401
 
 HERE = Path(__file__).resolve().parent
 GE_DIR = HERE.parent
-sys.path.insert(0, str(GE_DIR / "torch"))
 sys.path.insert(0, str(GE_DIR.parent))  # cannbot-dsl root (prefix_attn pkg)
 
-import ops  # noqa: E402,F401  registers torch.ops.prefix_attn.dn
-import converter  # noqa: E402,F401  registers the torchair converter
+# registers torch.ops.prefix_attn.dn + mounts OPP + torchair converter
+import prefix_attn.torch_ops  # noqa: E402,F401
 
 from torch_npu.dynamo import torchair  # noqa: E402
 

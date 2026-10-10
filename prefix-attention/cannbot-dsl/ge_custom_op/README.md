@@ -34,9 +34,11 @@ Execute 内 host 侧校验,无 D2H 同步)。
 | `src/artifacts.h` | 生成:产物文件名/符号名/核数默认值(export 脚本产出) |
 | `scripts/export_artifacts.py` | 板上导出 DN fp16/bf16 AOT .so + AICPU .so + MANIFEST |
 | `probe/` | P0 ABI 探针:C++ 独立 launch 与 python host 路径**逐位一致**(已 PASS) |
-| `opp/` | OPP 交付包(`ASCEND_CUSTOM_OPP_PATH` 指向此) |
-| `torch/` | PyTorch 前端:`ops.py`(torch.ops.prefix_attn.dn,PrivateUse1+Meta)、`converter.py`(torchair FX→GE 节点) |
+| `opp/` | OPP 交付包(`ASCEND_CUSTOM_OPP_PATH` 指向此;`prefix_attn.torch_ops` import 时自动挂载) |
 | `tests/` | GE 在线 Session 端到端 + torchair 小网络下沉测试 |
+
+PyTorch 前端(torch.ops 注册 + torchair converter)在包内
+`prefix_attn/torch_ops.py`;一键安装见 `../scripts/install.sh`。
 
 ## 关键机制:host ABI v9 frame
 
@@ -73,22 +75,25 @@ bash tests/run_torchair.sh       # 期望 TORCHAIR_NET_PASS
 
 ## PyTorch 中使用
 
-torchair 随 torch_npu 自带(`torch_npu.dynamo.torchair`,无需单独安装)。
+先跑一次 `../scripts/install.sh`(按板);torchair 随 torch_npu 自带
+(`torch_npu.dynamo.torchair`,无需单独安装)。之后任意目录:
 
 ```python
 import torch, torch_npu
-import sys; sys.path.insert(0, "<...>/ge_custom_op/torch")
-import ops        # 注册 torch.ops.prefix_attn.dn(eager: PrivateUse1 → DSL python 路径)
-import converter  # 注册 torchair FX→GE converter(下沉: GE PrefixAttnDn C++ Execute)
+import prefix_attn.torch_ops   # 注册 torch.ops.prefix_attn.dn + 自动挂载 OPP
+                               # + 注册 torchair FX→GE converter
 
-# eager 直接用
+# eager 直接用(PrivateUse1 → DSL python host 路径)
 out = torch.ops.prefix_attn.dn(q, k, v, bounds, 0.125)
 
 # 图模式:模型 forward 里调 torch.ops.prefix_attn.dn,然后
 from torch_npu.dynamo import torchair
 compiled = torch.compile(model, backend=torchair.get_npu_backend())
-out = compiled(x, bounds)   # 需 ASCEND_CUSTOM_OPP_PATH 指向 opp/
+out = compiled(x, bounds)   # 下沉到 GE PrefixAttnDn(C++ Execute,dlopen 产物)
 ```
+
+`prefix_attn.torch_ops` import 时自动把本目录 `opp/` 挂到
+`ASCEND_CUSTOM_OPP_PATH`(可用 `PREFIX_ATTN_DN_OPP` 覆盖),无需手动 export。
 
 下沉验证(test_torchair_net.py):编译前把 python host 路径替换为 raise——
 若发生 graph break 回退 eager 必然报错;实测通过且与 eager 输出逐位一致,

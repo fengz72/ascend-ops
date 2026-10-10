@@ -5,8 +5,30 @@ prefix-in-Q prefill attention 的 CANNBotDSL 实现,仅含 DN(K@Q^T)变体:
 attend prefix KV + 自身私有 KV,causal;GQA(N1 % N2 == 0),D=64,
 fp16/bf16,fp32 score/PV 累加。
 
+## 安装(一键,按板执行)
+
+```bash
+bash scripts/install.sh
+```
+
+依次完成:① 导出 kernel 产物(DN fp16/bf16 AOT .so + AICPU .so,已存在则跳过,
+`PREFIX_ATTN_FORCE_EXPORT=1` 强制重导)② 构建/安装 GE 交付件 `libcust_opapi.so`
+③ `pip install -e` 本包 ④ eager 冒烟。之后**任意目录**的 python 里:
+
 ```python
-import torch
+import torch, torch_npu
+import prefix_attn.torch_ops        # 注册 torch op + 自动挂载 OPP + torchair converter
+
+out = torch.ops.prefix_attn.dn(q, k, v, bounds)          # eager(scale 可选,0=1/sqrt(D))
+
+# 图模式(下沉到 GE PrefixAttnDn C++ 节点):forward 里用 torch.ops.prefix_attn.dn
+from torch_npu.dynamo import torchair                    # torch_npu 自带,无需另装
+compiled = torch.compile(model, backend=torchair.get_npu_backend())
+```
+
+原始函数接口(不经 torch.ops)同样可用:
+
+```python
 from prefix_attn import prefix_attn_dn
 
 # q [T,N1,64], k/v [T,N2,64] (npu, contiguous, fp16/bf16)
@@ -21,6 +43,9 @@ out = prefix_attn_dn(q, k, v, actual_seq_lengths)          # scale 默认 1/sqrt
 | `prefix_attn/dn.py` | DN kernel(cube/vector 数据通路旋转为 K@Q^T 方向;`@host` 入口 + AOT compile 缓存,T/B 动态维) |
 | `prefix_attn/metadata.py` | AICPU compact-box metadata planner(每次调用先跑的小 kernel,为各 AIC 划分 work item) |
 | `prefix_attn/validate.py` | host 侧输入校验(契约见上;D!=64、N1<N2、非 contiguous 等直接 raise) |
+| `prefix_attn/torch_ops.py` | PyTorch 前端:torch.ops.prefix_attn.dn 注册(PrivateUse1/Meta)+ OPP 自动挂载 + torchair converter |
+| `scripts/install.sh` | 一键安装(产物导出 → GE 交付件构建 → pip install -e → 冒烟) |
+| `pyproject.toml` | 打包配置(prefix-attn-dn) |
 | `codegen/` | codegen 产物快照:`launch_prefix_macro_dn.asc` 为 DN kernel(float16 特化)的 AscendC 代码;`codegen/aicpu/` 为 metadata AICPU kernel 的生成源码(与 dtype 无关),再生成命令见下 |
 | `ge_custom_op/` | GE 自定义算子接入(custom_op_v2 形态1):单节点 `PrefixAttnDn`,Execute 内双 launch;含产物导出脚本、ABI 探针、OPP 包与 GE Session 端到端测试,详见其 README |
 | `tests/` | 最简 NPU 功能测试:fp64 golden,4 case(单 batch / GQA 多 batch / 两个生产 uniform shape) |
