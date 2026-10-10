@@ -5,15 +5,19 @@ prefix-in-Q prefill attention 的 CANNBotDSL 实现(K@Q^T 宏流水数据通路)
 attend prefix KV + 自身私有 KV,causal;GQA(N1 % N2 == 0),D=64,
 fp16/bf16,fp32 score/PV 累加。
 
-## 安装(一键,按板执行)
+## 安装(两个交付件解耦,按板执行)
 
 ```bash
-bash scripts/install.sh
+bash scripts/install.sh       # python 前端:pip install -e + eager 冒烟(需 cannbotdsl)
+bash scripts/install_ge.sh    # GE 交付件:bisheng 从签入 .asc 编译 + 装 OPP(无需 cannbotdsl)
 ```
 
-依次完成:① 导出 kernel 产物(kernel fp16/bf16 AOT .so + AICPU .so,已存在则跳过,
-`PREFIX_ATTN_FORCE_EXPORT=1` 强制重导)② 构建/安装 GE 交付件 `libcust_opapi.so`
-③ `pip install -e` 本包 ④ eager 冒烟。之后**任意目录**的 python 里:
+- **python 前端**(开发/验证侧):eager 直调走 DSL host,需 cannbotdsl
+- **GE 交付件**(模型接入侧):CMake 调 bisheng 从 `codegen/*.asc` 编 kernel .so,
+  构建与运行均不需 cannbotdsl;cannbotdsl 仅在 kernel 改动后重跑
+  `ge_custom_op/scripts/dump_kernel_src.py` 再生成 .asc 时用到
+
+装好后**任意目录**的 python 里:
 
 ```python
 import torch, torch_npu
@@ -25,6 +29,9 @@ out = torch.ops.ascendc_ops.prefix_attention(q, k, v, bounds)          # eager(s
 from torch_npu.dynamo import torchair                    # torch_npu 自带,无需另装
 compiled = torch.compile(model, backend=torchair.get_npu_backend())
 ```
+
+> `prefix_attn` 用 PEP 562 懒加载:无 cannbotdsl 环境也能 `import prefix_attn.torch_ops`
+> 完成图下沉,只有 eager 直调才需要 DSL(见 `tests/test_no_dsl_env.py`)。
 
 原始函数接口(不经 torch.ops)同样可用:
 
@@ -44,11 +51,14 @@ out = prefix_attention(q, k, v, actual_seq_lengths)          # scale 默认 1/sq
 | `prefix_attn/metadata.py` | AICPU compact-box metadata planner(每次调用先跑的小 kernel,为各 AIC 划分 work item) |
 | `prefix_attn/validate.py` | host 侧输入校验(契约见上;D!=64、N1<N2、非 contiguous 等直接 raise) |
 | `prefix_attn/torch_ops.py` | PyTorch 前端:torch.ops.ascendc_ops.prefix_attention 注册(PrivateUse1/Meta)+ OPP 自动挂载 + torchair converter |
-| `scripts/install.sh` | 一键安装(产物导出 → GE 交付件构建 → pip install -e → 冒烟) |
+| `prefix_attn/__init__.py` | PEP 562 懒加载(接入层与 DSL 实现层按 import 时机解耦) |
+| `scripts/install.sh` | python 前端安装(pip install -e + eager 冒烟) |
+| `scripts/install_ge.sh` | GE 交付件构建安装(bisheng 编 .asc → OPP,无需 cannbotdsl) |
 | `pyproject.toml` | 打包配置(prefix-attention) |
-| `codegen/` | codegen 产物快照:`launch_prefix_macro.asc` 为 macro kernel(float16 特化)的 AscendC 代码;`codegen/aicpu/` 为 metadata AICPU kernel 的生成源码(与 dtype 无关),再生成命令见下 |
-| `ge_custom_op/` | GE 自定义算子接入(custom_op_v2 形态1):单节点 `PrefixAttention`,Execute 内双 launch;含产物导出脚本、ABI 探针、OPP 包与 GE Session 端到端测试,详见其 README |
-| `tests/` | 最简 NPU 功能测试:fp64 golden,4 case(单 batch / GQA 多 batch / 两个生产 uniform shape) |
+| `codegen/` | **GE 构建源码**:`launch_prefix_macro_{fp16,bf16}.asc`(macro kernel AscendC)+ `aicpu/`(metadata planner 源码);由 `dump_kernel_src.py` 生成、签入,CMake+bisheng 据此编译 |
+| `ge_custom_op/` | GE 自定义算子接入(custom_op_v2 形态1):单节点 `PrefixAttention`,Execute 内双 launch;含 dump 脚本、ABI 探针、CMake、OPP 包与端到端测试,详见其 README |
+| `tests/` | NPU 功能测试(fp64 golden,4 case)+ 无 cannbotdsl 环境测试 |
+
 
 ## 环境要求(实测基线)
 
@@ -72,46 +82,28 @@ python -m pytest tests/ -v        # 无 NPU / 无 torch_npu 时自动 skip
 
 容差:fp16 0.003,bf16 0.025(与完整回归套件一致)。
 
-## codegen 快照再生成
+## codegen 源码再生成(仅 kernel 改动时)
 
-`codegen/` 内是 DSL 编译 macro kernel 时 dump 的 AscendC 代码(float16 特化):
+`codegen/` 内是 GE 交付件的**构建源码**(不是参考快照):macro kernel 的
+fp16/bf16 AscendC(`launch_prefix_macro_{fp16,bf16}.asc`)+ metadata AICPU
+planner 源码(`aicpu/`)。CMake 用 bisheng 据此编译出三个 kernel .so。
+
+kernel(`prefix_attn/*.py`)改动后,重新生成(唯一需要 cannbotdsl 的环节,需 NPU):
 
 ```bash
 cd cannbot-dsl
-rm -rf codegen && mkdir codegen
-CANNBOTDSL_DUMP_ASCENDC=1 CANNBOTDSL_DUMP_DIR=$PWD/codegen python - <<'EOF'
-import torch
-from prefix_attn import prefix_attention
-bounds = [20] + [20 + 130 * (i + 1) for i in range(10)]
-gen = torch.Generator().manual_seed(71000)
-q = torch.randn((bounds[-1], 14, 64), generator=gen).half()
-k = torch.randn((bounds[-1], 2, 64), generator=gen).half()
-v = torch.randn((bounds[-1], 2, 64), generator=gen).half()
-prefix_attention(q.npu(), k.npu(), v.npu(),
-               torch.tensor(bounds, dtype=torch.int32, device="npu"))
-torch.npu.synchronize()
-EOF
+python ge_custom_op/scripts/dump_kernel_src.py
 ```
 
-对应源码版本记录在 `codegen/SOURCE_INFO.json`(源仓 sha256)。
+它一次性 dump fp16/bf16 .asc + aicpu 源码(去掉仅 host 仿真用的 `_x86.cpp`),
+并生成 `ge_custom_op/src/artifacts.h`(host ABI 符号名/核数)与
+`codegen/SOURCE_INFO.json`(源码 sha256、cannbotdsl 版本、device、编译 case)。
+之后 `bash scripts/install_ge.sh` 重新编译 GE 交付件即可。
 
-metadata AICPU kernel 的生成源码(与 dtype 无关,运行时由
-`compile_aicpu_kernel()` 在临时目录即时生成编译):
+> fp16/bf16 设备 kernel 符号同名,故分两个 .so;host invoke/schema 符号带各自
+> hash 区分(记录在 artifacts.h)。aicpu 源码与真实 `compile_aicpu_kernel()`
+> 落盘逐字节一致(已验证)。
 
-```bash
-python - <<'EOF'
-from pathlib import Path
-from prefix_attn.metadata import _prefix_attn_metadata_kernel as k
-out = Path("codegen/aicpu"); out.mkdir(parents=True, exist_ok=True)
-for fname, text in k.generate_sources(launch_mode="interface").items():
-    if fname.endswith("_x86.cpp"):   # host 仿真变体,生产路径不编译,不入库
-        continue
-    (out / fname).write_text(text)
-EOF
-```
-
-已验证:`codegen/aicpu/` 与真实编译路径(`compile_aicpu_kernel`)落盘源码
-逐字节一致,且可正常编译链接出 `.so`。
 
 ## 性能(Ascend950PR,msprof Task Duration min,warmup 5 + repeat 50)
 

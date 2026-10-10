@@ -1,38 +1,90 @@
 {
-  "description": "AscendC codegen snapshots dumped by cannbotdsl: the macro attention kernel (float16 specialization, launch_prefix_macro.asc) and the AICPU metadata planner kernel (codegen/aicpu/, dtype-independent).",
+  "description": "codegen'd AscendC sources for the GE deliverable build. The macro kernel (fp16/bf16 .asc) and the AICPU metadata planner (aicpu/) are compiled by CMake+bisheng WITHOUT cannbotdsl; this dump step is the only cannbotdsl user.",
   "generated_by": {
     "cannbotdsl_version": "0.7.0",
-    "cannbotdsl_commit": "af8e71f5d7d72a882e460ff85a388426716a2a07",
-    "cannbotdsl_build_timestamp": "2026-09-30T08:13:04Z",
-    "npu_arch": "dav-3510 (__NPU_ARCH__ == 3510)",
-    "host_abi_version": 9,
-    "env": {
-      "macro kernel": "CANNBOTDSL_DUMP_ASCENDC=1 CANNBOTDSL_DUMP_DIR=<codegen/> (compile fp16 case)",
-      "AICPU metadata": "_prefix_attn_metadata_kernel.generate_sources(launch_mode='interface')"
-    }
+    "build_info": {
+      "build_timestamp": "2026-09-30T08:13:04Z",
+      "cann_baseline": "9.2",
+      "cannbotdsl_commit": "af8e71f5d7d72a882e460ff85a388426716a2a07",
+      "cannbotdsl_version": "0.7.0",
+      "compiler": "GNU 14.2.1",
+      "llvm_commit": "cd708029e0b2869e80abe31ddb175f7c35361f90",
+      "llvm_version": "19.1.7",
+      "manylinux_baseline": "manylinux_2_28_aarch64",
+      "native_artifact_sha256": {
+        "_cannir": "34ea8f37b5fd72cdc73d2fe5ff61d563c6ad659f6c4f4745423f15f66aeced9d",
+        "_cannir_runtime": "a84be1925b8ba33616d2a25a9b17c063dd2de98ad7247ba252aeeccb5bf0d6e4",
+        "_host_runtime": "8292c5d6795b52e4296b2b63ac6e3d87a320a5161ec15a48ffcf8e8cdcd2830b",
+        "_mlir": "99666bca3577e1bdccd71c521ee9597e3c355795ed79b589844805048a1eda63",
+        "common_capi": "053b0e371be0edef2ef7bb088376ddac0124dfb17fa69627bebeaa9dcfe0b243"
+      },
+      "npu_arch": "dav-3510",
+      "python_abi": "cp312-cp312"
+    },
+    "torch": "2.10.0+cpu",
+    "torch_npu": "2.10.0.post2",
+    "command": "python ge_custom_op/scripts/dump_kernel_src.py"
+  },
+  "device": {
+    "name": "Ascend950PR_9589",
+    "cube_core_num": 32,
+    "vector_core_num": 64,
+    "effective_aic": 32
+  },
+  "kernel_config": {
+    "n1": 14,
+    "n2": 2,
+    "head_dim": 64,
+    "aic_core_cap": 36,
+    "metadata_padded_count": 4096
   },
   "compile_case": {
-    "dtype": "float16",
+    "dtype": "float16/bfloat16",
     "prefix": 20,
     "private_length": 130,
     "batches": 10,
     "total_tokens": 1320,
-    "n1": 14,
-    "n2": 2,
-    "head_dim": 64,
-    "note": "T/B are dynamic Dims in the AOT spec; the snapshot is the fp16 trace of _launch_prefix_macro (kernel__PrefixMacroKernel___call___0)."
+    "seed": 71000
   },
   "sources_sha256": {
-    "__init__.py": "d9b8364551a1513b92f0f33058b483955926e490e5fc5ad6cdcba07adc4d0971",
+    "__init__.py": "3be439812ab58ebfd94ed4a98cbcc6fbade66dfa88e03a8005be505054583a71",
     "attention.py": "bfe2e6aa3cce6289db00b88150591a0de6f2a554477dc8a6e5b69f2b0d6694f8",
     "metadata.py": "d23a3bd232c449d88a79fa79b72aa64e83c7811936c43b6d5433bde2e0023264",
-    "torch_ops.py": "fcaad7505a0bb3a87f7c72644e24a441127057b975c625087a5a3ad0dfa0d5d2",
+    "torch_ops.py": "369613454458e0477dc5a5006588784dac169c0541045258fb2724545d3f2613",
     "validate.py": "5a86d5d288e758febb9e2c405e8ae16d9123895801ff2457db564b6d896e386f"
   },
+  "kernel": {
+    "fp16": {
+      "file": "launch_prefix_macro_fp16.asc",
+      "invoke_symbol": "_launch_prefix_macro_39f5b587f6db6b863d9b6a3611b3637c__cannbot_invoke_v9",
+      "schema_symbol": "_launch_prefix_macro_39f5b587f6db6b863d9b6a3611b3637c__cannbot_schema_v2",
+      "sha256": "a814d82b11ff262c6e50a9ef1c08eaf7a3512582b29f56e19ddb4f140e171656"
+    },
+    "bf16": {
+      "file": "launch_prefix_macro_bf16.asc",
+      "invoke_symbol": "_launch_prefix_macro_e70d03347e8c06fbc47a470ea567813f__cannbot_invoke_v9",
+      "schema_symbol": "_launch_prefix_macro_e70d03347e8c06fbc47a470ea567813f__cannbot_schema_v2",
+      "sha256": "1dce39470b209ee23fd3416642283603679ea22e858d221ae9f7dd85a588dd7e"
+    }
+  },
+  "aicpu": {
+    "files": [
+      "_prefix_attn_metadata_kernel_args.h",
+      "_prefix_attn_metadata_kernel_body.inc",
+      "_prefix_attn_metadata_kernel_kernel.aicpu",
+      "_prefix_attn_metadata_kernel_shim.asc"
+    ],
+    "launch_symbol": "_prefix_attn_metadata_kernel_do",
+    "sha256": {
+      "_prefix_attn_metadata_kernel_args.h": "01f1221133939af9c241697e21bd19f417cf2725e0a54207b20485ff26bab5a9",
+      "_prefix_attn_metadata_kernel_body.inc": "067312e9c8ea23d97c845fc9e09d94500ee455585b21f84dc5d0c050e8ed6044",
+      "_prefix_attn_metadata_kernel_kernel.aicpu": "1c7624fa23413ec7c6830710a5f320c26a7b62bc3185f85d3a5c9ebd2b087935",
+      "_prefix_attn_metadata_kernel_shim.asc": "0a89bc77a75cdf215786451288121ddfbd05386283682d1947f379a49933f85c"
+    }
+  },
   "notes": [
-    "File layout: device kernel (namespace cannbotdsl_92, guarded by __NPU_ARCH__==3510) + host schema/invoke ABI (extern \"C\" entries at the tail).",
-    "bfloat16 mentions only appear in the generic runtime prelude helpers, not in the kernel body (fp16 specialization).",
-    "The AICPU snapshot keeps the 4 production files; the host-simulation variant (_x86.cpp, only compiled with build_x86=True) is not dumped.",
-    "Regeneration commands: see README.md 'codegen 快照再生成'."
+    "fp16/bf16 device kernel symbols collide (kernel__PrefixMacroKernel___call___0); each dtype compiles to a separate .so.",
+    "The .asc tail carries the host ABI v9 invoke/schema entries; dsl_launcher dlopens them by the hashed symbols in artifacts.h.",
+    "AICPU snapshot keeps the 4 production files (no _x86.cpp host-sim variant)."
   ]
 }

@@ -13,7 +13,7 @@ if [ ! -f "$GE_DIR/opp/op_graph/lib/linux/aarch64/libcust_opapi.so" ]; then
   cmake --install "$BUILD" > /dev/null
 fi
 if [ ! -f "$GE_DIR/opp/op_graph/lib/linux/aarch64/artifacts/kernel_fp16.so" ]; then
-  echo "[ERROR] artifacts missing; run: python scripts/export_artifacts.py" >&2
+  echo "[ERROR] artifacts missing; run: bash scripts/install_ge.sh" >&2
   exit 1
 fi
 
