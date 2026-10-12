@@ -14,9 +14,6 @@ into rows, since KV is never split): unit ``u=0`` is the shared prefix
 ``m = q_head*bl_u + q_tile``, so the ``(unit, row)`` walk enumerates the
 same flat work-item ordering as before (all PREFIX items q_head-major
 then q_tile, then PRIVATE items batch-major, then q_head, then q_tile).
-The pure-Python goldens (``WorkItem``/``build_work_items``/
-``plan_prefix_core_ranges`` plus the box conversion) live in
-``test/test_prefix_attn_metadata.py``.
 
 Layout (int32 elements)::
 
@@ -33,7 +30,6 @@ previous unit with its full extent).  An unused core keeps an all-zero
 This module requires the cannbotdsl AICPU frontend (remote NPU host only).
 """
 
-import os
 import tempfile
 from functools import lru_cache
 
@@ -76,18 +72,6 @@ def get_effective_core_counts(stream=None):
     except (ImportError, OSError, RuntimeError, TypeError, ValueError):
         pass
     cube = min(cube, AIC_CORE_NUM)
-    # Profiling can deliberately use fewer block cores than the device has.
-    # This override is consumed by both the host launch and the AICPU
-    # metadata planner, so their ownership ranges stay ABI-consistent.
-    requested = os.environ.get("PREFIX_ATTN_AIC_CORES")
-    if requested is not None:
-        try:
-            requested = int(requested)
-        except ValueError as exc:
-            raise ValueError("PREFIX_ATTN_AIC_CORES must be a positive integer") from exc
-        if requested <= 0:
-            raise ValueError("PREFIX_ATTN_AIC_CORES must be a positive integer")
-        cube = min(cube, requested)
     if cube <= 0 or vector < cube:
         raise RuntimeError(
             f"invalid effective NPU core counts: AIC={cube}, AIV={vector}"

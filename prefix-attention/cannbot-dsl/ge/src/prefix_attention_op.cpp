@@ -4,8 +4,8 @@
 // workspace -> AICPU metadata planner launch -> macro attention kernel
 // launch (schema-driven ABI v9 frame), both async on the GE execution
 // stream.  Kernels are the prebuilt cannbotdsl artifacts under
-// <this .so dir>/artifacts/ (see scripts/export_artifacts.py); the launcher
-// was verified bit-exact against the python host path (probe/).
+// <this .so dir>/artifacts/ (built by CMake+bisheng from ge/codegen); the launcher
+// was verified bit-exact against the python host path.
 #include <cmath>
 #include <iostream>
 
@@ -42,7 +42,10 @@ class PrefixAttention : public ge::EagerExecuteOp {
       PREFIX_ATTENTION_FAIL("null input tensor");
     }
 
-    // Contract mirror of prefix_attn/validate.py (host-side, no D2H).
+    // Shape/dtype contract of prefix_attn/validate.py, checked host-side
+    // without D2H.  Bounds contents (strictly increasing, ending at T) are
+    // NOT validated here; the fixed N1/N2 specialization is enforced in
+    // dsl_launcher against the kernel artifact.
     const gert::Shape &q_shape = query->GetShape().GetStorageShape();
     const gert::Shape &k_shape = key->GetShape().GetStorageShape();
     const gert::Shape &v_shape = value->GetShape().GetStorageShape();

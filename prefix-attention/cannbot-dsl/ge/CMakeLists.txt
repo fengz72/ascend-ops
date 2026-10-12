@@ -1,19 +1,19 @@
 # GE custom op (custom_op_v2) for the prefix-attention macro kernel.
 #
 # Kernel binaries are compiled here from the checked-in codegen'd AscendC
-# sources (../codegen) with bisheng -- NO cannbotdsl needed at build time.
+# sources (codegen/) with bisheng -- NO cannbotdsl needed at build time.
 # cannbotdsl is only used by scripts/dump_kernel_src.py to (re)generate the
 # sources when the DSL kernel changes.
 #
 # fp16/bf16 device kernel symbols collide, so each dtype is a separate .so;
 # libcust_opapi.so dlopens them (see src/dsl_launcher.cpp).
 #
-# Targets / outputs (installed under opp/):
+# Targets / outputs (installed into $ASCEND_HOME_PATH/opp/op_graph, i.e.
+# directly into the CANN directory -- GE finds them via
+# ASCEND_CUSTOM_OPP_PATH=$ASCEND_HOME_PATH/opp):
 #   kernel_fp16.so / kernel_bf16.so   macro kernel (bisheng ASC, from .asc)
 #   aicpu_metadata.so                 AICPU planner (bisheng aicpu, from codegen/aicpu)
 #   libcust_opapi.so                  GE custom op + launcher (CXX)
-#   prefix_attention_op_proto         REG_OP-only proto lib for the ES generator
-#   es_prefix_attn                    generated ES python wrapper (GE Session test)
 #
 # Configure:
 #   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release [-DNPU_ARCH=dav-3510]
@@ -46,7 +46,7 @@ set(GE_INCLUDES
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
-set(CODEGEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../codegen")
+set(CODEGEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/codegen")
 set(AICPU_DIR "${CODEGEN_DIR}/aicpu")
 set(KERNEL_BUILD "${CMAKE_BINARY_DIR}/kernel_artifacts")
 file(MAKE_DIRECTORY "${KERNEL_BUILD}")
@@ -117,31 +117,14 @@ target_link_directories(cust_opapi PRIVATE
 )
 target_link_libraries(cust_opapi PRIVATE ascendcl acl_rt register lowering dl)
 
-# --- REG_OP-only proto library for the ES wrapper generator ---
-add_library(prefix_attention_op_proto SHARED src/prefix_attention_proto.cc)
-target_compile_definitions(prefix_attention_op_proto PRIVATE OP_PROTO_LIB)
-target_compile_options(prefix_attention_op_proto PRIVATE -fvisibility=hidden)
-target_include_directories(prefix_attention_op_proto PRIVATE
-  "${ASCEND_HOME_PATH}/include" "${ASCEND_HOME_PATH}/include/external"
-  "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(prefix_attention_op_proto PRIVATE
-  "${ASCEND_HOME_PATH}/lib64/libopp_registry.so"
-  "${ASCEND_HOME_PATH}/lib64/libgraph.so"
-  "${ASCEND_HOME_PATH}/lib64/libgraph_base.so")
-
-# --- OPP package install (ASCEND_CUSTOM_OPP_PATH points at opp/) ---
-set(OPP_LIB "${CMAKE_CURRENT_SOURCE_DIR}/opp/op_graph/lib/linux/aarch64")
+# --- OPP install directly into the CANN directory ---
+# GE scans each ASCEND_CUSTOM_OPP_PATH entry as <root>/op_graph/...; pointing
+# the env at $ASCEND_HOME_PATH/opp (a fixed, checkout-independent path) makes
+# this install visible.  NOTE: a CANN upgrade wipes this directory.
+set(OPP_ROOT "${ASCEND_HOME_PATH}/opp")
+set(OPP_LIB "${OPP_ROOT}/op_graph/lib/linux/aarch64")
 install(TARGETS cust_opapi DESTINATION "${OPP_LIB}")
 install(FILES ${KERNEL_SOS} DESTINATION "${OPP_LIB}/artifacts")
-install(FILES "${CODEGEN_DIR}/SOURCE_INFO.json"
-        DESTINATION "${OPP_LIB}/artifacts" RENAME MANIFEST.json)
 install(FILES include/prefix_attention_op.h
-        DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}/opp/op_graph/include")
+        DESTINATION "${OPP_ROOT}/op_graph/include")
 
-# --- ES python wrapper generation (online GE Session tests) ---
-list(APPEND CMAKE_MODULE_PATH "${ASCEND_HOME_PATH}/include/ge/cmake")
-find_package(GenerateEsPackage REQUIRED)
-add_es_library(
-  ES_LINKABLE_AND_ALL_TARGET es_prefix_attn
-  OPP_PROTO_TARGET prefix_attention_op_proto
-  OUTPUT_PATH ${CMAKE_BINARY_DIR}/es_output)

@@ -1,7 +1,8 @@
 // Implementation of the schema-driven DSL artifact launcher.  The host ABI
 // structs below mirror the definitions embedded in the cannbotdsl codegen
-// dump (codegen/launch_prefix_macro.asc, host ABI v9 / schema v2) and are
-// validated against the artifact's own schema entry at init.
+// dump (codegen/launch_prefix_macro_{fp16,bf16}.asc, host ABI v9 /
+// schema v2) and are validated against the artifact's own schema entry at
+// init.
 #include "dsl_launcher.h"
 
 #include <dlfcn.h>
@@ -117,10 +118,14 @@ void *OpenArtifact(const std::string &dir, const char *name) {
   std::string path = dir + "/" + name;
   void *handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (handle == nullptr) {
-    // probe builds may sit directly next to the artifacts
+    // also allow the loader search path (e.g. artifacts via LD_LIBRARY_PATH)
     handle = dlopen(name, RTLD_NOW | RTLD_LOCAL);
   }
-  if (handle == nullptr) SetError(std::string("dlopen failed: ") + dlerror());
+  if (handle == nullptr) {
+    const char *err = dlerror();
+    SetError(std::string("dlopen failed: ") +
+             (err != nullptr ? err : "unknown error"));
+  }
   return handle;
 }
 
@@ -128,7 +133,9 @@ void *Resolve(void *handle, const char *symbol) {
   dlerror();
   void *fn = dlsym(handle, symbol);
   if (fn == nullptr) {
-    SetError(std::string("dlsym ") + symbol + " failed: " + dlerror());
+    const char *err = dlerror();
+    SetError(std::string("dlsym ") + symbol + " failed: " +
+             (err != nullptr ? err : "symbol resolved to NULL"));
   }
   return fn;
 }
@@ -169,32 +176,18 @@ int ValidateSchema(const SchemaV2 *schema, const char *tag) {
 }
 
 int QueryAicCoresLocked() {
-  int aic = PREFIX_ATTN_AIC_DEFAULT;
-  const char *env = getenv("PREFIX_ATTN_AIC_CORES");
-  if (env != nullptr) {
-    int requested = atoi(env);
-    if (requested <= 0) {
-      SetError("PREFIX_ATTN_AIC_CORES must be a positive integer");
-      return -1;
-    }
-    aic = requested < aic ? requested : aic;
-  }
-  if (aic > PREFIX_ATTN_AIC_CAP) aic = PREFIX_ATTN_AIC_CAP;
-  return aic;
+  // Fixed AIC budget for now; the python host queries the device instead.
+  constexpr int kFixedAicCores = 16;
+  return kFixedAicCores;
 }
 
 void InitOnce() {
-  std::string dir = ".";
-  const char *env_dir = getenv("PREFIX_ATTN_ARTIFACTS");
-  if (env_dir != nullptr && env_dir[0] != '\0') {
-    dir = env_dir;
-  } else {
-    std::string self = DirOfThisLibrary();
-    // OPP layout: artifacts/ sits next to this .so; probe layout: same dir.
-    dir = self + "/artifacts";
-    if (access((dir + "/" + PREFIX_ATTN_SO_FP16).c_str(), R_OK) != 0) {
-      dir = self;
-    }
+  // OPP layout (installed by install.sh): artifacts/ sits next to this .so;
+  // fallback: same dir (some layouts place artifacts directly next to it).
+  std::string self = DirOfThisLibrary();
+  std::string dir = self + "/artifacts";
+  if (access((dir + "/" + PREFIX_ATTN_SO_FP16).c_str(), R_OK) != 0) {
+    dir = self;
   }
   g_art.kernel_fp16 = OpenArtifact(dir, PREFIX_ATTN_SO_FP16);
   if (g_art.kernel_fp16 == nullptr) { g_init_status = 1; return; }
@@ -239,6 +232,29 @@ void WriteTensorSlot(uint8_t *frame, const SlotSchemaV2 &slot, void *ptr,
          slot.logical_rank * sizeof(int64_t));
 }
 
+// Per-thread reusable ABI call frame.  The frame size/alignment are fixed at
+// init (identical for both dtype specializations), so each thread keeps one
+// buffer instead of aligned_alloc/free per launch.
+struct ThreadFrame {
+  uint8_t *buf = nullptr;
+  uint64_t cap = 0;
+  uint64_t alignment = 0;
+  ~ThreadFrame() { free(buf); }
+};
+
+uint8_t *AcquireFrame(uint64_t alignment, uint64_t bytes) {
+  static thread_local ThreadFrame frame;
+  if (frame.buf == nullptr || frame.cap < bytes ||
+      frame.alignment < alignment) {
+    free(frame.buf);
+    const uint64_t alloc = (bytes + alignment - 1) / alignment * alignment;
+    frame.buf = static_cast<uint8_t *>(aligned_alloc(alignment, alloc));
+    frame.cap = (frame.buf != nullptr) ? alloc : 0;
+    frame.alignment = alignment;
+  }
+  return frame.buf;
+}
+
 }  // namespace
 
 int LauncherInit() {
@@ -259,6 +275,18 @@ int LauncherRun(const LaunchParams &p) {
     SetError("null device pointer or stream in LaunchParams");
     return 1;
   }
+  // The kernel artifacts are compiled for one fixed (N1, N2) specialization
+  // (qwen2.5-0.5b); the frame's shape fields cannot override the baked-in
+  // constants, so reject anything else before launching.
+  if (p.n1 != PREFIX_ATTN_N1 || p.n2 != PREFIX_ATTN_N2) {
+    char buf[128];
+    snprintf(buf, sizeof(buf),
+             "unsupported N1/N2 %" PRId64 "/%" PRId64
+             " (kernel artifact built for N1=%d, N2=%d)",
+             p.n1, p.n2, PREFIX_ATTN_N1, PREFIX_ATTN_N2);
+    SetError(buf);
+    return 1;
+  }
   const SchemaV2 *schema = p.bf16 ? g_art.schema_bf16 : g_art.schema_fp16;
   InvokeV9Fn invoke = p.bf16 ? g_art.invoke_bf16 : g_art.invoke_fp16;
 
@@ -273,13 +301,12 @@ int LauncherRun(const LaunchParams &p) {
   uint64_t frame_bytes = schema->frame_bytes;
   uint64_t alignment = schema->frame_alignment ? schema->frame_alignment : 8;
   uint64_t alloc_bytes = (frame_bytes + alignment - 1) / alignment * alignment;
-  void *raw = aligned_alloc(alignment, alloc_bytes);
-  if (raw == nullptr) {
-    SetError("aligned_alloc failed for call frame");
+  uint8_t *frame = AcquireFrame(alignment, alloc_bytes);
+  if (frame == nullptr) {
+    SetError("failed to allocate call frame");
     return 1;
   }
-  memset(raw, 0, alloc_bytes);
-  uint8_t *frame = reinterpret_cast<uint8_t *>(raw);
+  memset(frame, 0, alloc_bytes);
   FrameHeaderV9 *header = reinterpret_cast<FrameHeaderV9 *>(frame);
   header->magic = kFrameMagic;
   header->host_abi_version = kHostAbiVersion;
@@ -309,7 +336,6 @@ int LauncherRun(const LaunchParams &p) {
       static_cast<int64_t>(g_art.aic_cores);
 
   int32_t status = invoke(p.stream, frame, frame_bytes);
-  free(raw);
   if (status != 0) {
     char buf[96];
     snprintf(buf, sizeof(buf), "invoke_v9 returned %" PRId32, status);
@@ -321,3 +347,34 @@ int LauncherRun(const LaunchParams &p) {
 const char *LauncherError() { return g_error.c_str(); }
 
 }  // namespace prefix_attn
+
+extern "C" int prefix_attn_run(void *out, const void *query, const void *key,
+                               const void *value, const void *bounds,
+                               long long total_tokens, long long n1,
+                               long long n2, long long bounds_len,
+                               void *metadata, float scale, void *stream,
+                               int bf16) {
+  prefix_attn::LaunchParams p{};
+  p.out = out;
+  p.query = const_cast<void *>(query);
+  p.key = const_cast<void *>(key);
+  p.value = const_cast<void *>(value);
+  p.bounds = const_cast<void *>(bounds);
+  p.total_tokens = total_tokens;
+  p.n1 = n1;
+  p.n2 = n2;
+  p.bounds_len = bounds_len;
+  p.metadata = metadata;
+  p.scale = scale;
+  p.stream = stream;
+  p.bf16 = bf16 != 0;
+  return prefix_attn::LauncherRun(p);
+}
+
+extern "C" long long prefix_attn_metadata_elems(void) {
+  return PREFIX_ATTN_METADATA_ELEMS;
+}
+
+extern "C" const char *prefix_attn_last_error(void) {
+  return prefix_attn::LauncherError();
+}

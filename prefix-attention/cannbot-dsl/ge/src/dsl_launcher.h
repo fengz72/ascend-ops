@@ -30,13 +30,13 @@ struct LaunchParams {
 };
 
 // dlopen the three artifact .so files (idempotent).  Directory resolution:
-// $PREFIX_ATTN_ARTIFACTS, else <dir of this .so>/artifacts, else
-// <dir of this .so> (probe builds sit next to the artifacts).
+// <dir of this .so>/artifacts (the OPP layout installed by install.sh), else
+// <dir of this .so> (some layouts place artifacts directly next to the .so).
 // Returns 0 on success, non-zero error code otherwise (see LauncherError).
 int LauncherInit();
 
-// Effective AIC core budget: min(device default from export manifest, cap),
-// with $PREFIX_ATTN_AIC_CORES override (same semantics as the python host).
+// Effective AIC core budget: fixed 16 for now (the python host queries the
+// device via torch_npu instead).
 int QueryAicCores();
 
 // Launch sequence (both async on params.stream, order guaranteed):
@@ -49,3 +49,29 @@ int LauncherRun(const LaunchParams &params);
 const char *LauncherError();
 
 }  // namespace prefix_attn
+
+// Flat C ABI for eager frontends (e.g. ge/prefix_attn_torch): the
+// extern "C" symbols are stable across C++ ABI variants, so consumers link
+// libcust_opapi.so and declare these prototypes without shipping headers.
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// One eager launch (async on `stream`); `metadata` must be a
+// zero-initialized device buffer of prefix_attn_metadata_elems() int32.
+// Returns 0 on success; see prefix_attn_last_error().
+int prefix_attn_run(void *out, const void *query, const void *key,
+                    const void *value, const void *bounds,
+                    long long total_tokens, long long n1, long long n2,
+                    long long bounds_len, void *metadata, float scale,
+                    void *stream, int bf16);
+
+// int32 element count of the metadata workspace.
+long long prefix_attn_metadata_elems(void);
+
+// Last launcher error message (thread-local).
+const char *prefix_attn_last_error(void);
+
+#ifdef __cplusplus
+}
+#endif

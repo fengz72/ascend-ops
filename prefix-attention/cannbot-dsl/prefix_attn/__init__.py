@@ -1,17 +1,12 @@
 """prefix_attn — prefix-in-Q attention (CANNBotDSL implementation).
 
-The package separates two layers by import time:
+The kernel implementation layer: ``prefix_attn.prefix_attention`` runs the
+DSL host path.  cannbotdsl is imported lazily on first attribute access, so
+importing the package works without it; only eager direct calls require it.
 
-  - torch integration layer (``prefix_attn.torch_ops``): schema/dispatch
-    registration + torchair converter + OPP mount.  Depends only on torch, so
-    ``import prefix_attn.torch_ops`` works in a production environment without
-    cannbotdsl (graph lowering runs the GE C++ deliverable, no DSL needed).
-  - kernel implementation layer (``prefix_attn.prefix_attention``): the DSL
-    host path.  cannbotdsl is imported lazily on first attribute access, so
-    only eager direct calls require it.
-
-``prefix_attention`` is exposed via PEP 562 module ``__getattr__`` to keep the
-top-level import free of cannbotdsl.
+Torch integration (torch.ops registration + torchair converter) lives in the
+separate ``prefix_attn_torch`` package (ge/prefix_attn_torch), which runs the GE
+deliverable without cannbotdsl.
 """
 
 __all__ = ["prefix_attention"]
@@ -24,8 +19,9 @@ def __getattr__(name):
         except ImportError as exc:  # cannbotdsl missing at eager call time
             raise ImportError(
                 "prefix_attn.prefix_attention (the eager DSL host path) needs "
-                "cannbotdsl. Install it, or use graph lowering (torchair) which "
-                "runs the GE C++ deliverable without cannbotdsl."
+                "cannbotdsl. Install it, or use the prefix_attn_torch torch "
+                "binding (ge/prefix_attn_torch), which runs the GE deliverable "
+                "without cannbotdsl."
             ) from exc
         return prefix_attention
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prefix-attn-torch"
+version = "1.0.0"
+description = "PyTorch binding for the PrefixAttention GE custom operator (eager via the GE deliverable .so, graph mode via torchair)"
+requires-python = ">=3.10"
+dependencies = ["torch", "torch-npu"]
+
+[tool.setuptools]
+packages = ["prefix_attn_torch"]
+
+[tool.setuptools.package-data]
+prefix_attn_torch = ["*.cpp"]
