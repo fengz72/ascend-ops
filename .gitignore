@@ -1,10 +1,15 @@
 # 构建产物
+build/
 build_out/
+dist/
 host_native_tiling/
 
-# Python缓存
+# Python生成物
 __pycache__/
 *.pyc
+.pytest_cache/
+*.egg-info/
+.dump/
 
 # 编辑器/系统
 .vscode/
@@ -18,3 +23,6 @@ ge_proto_*.txt
 kernel_meta/
 extra-info/
 fusion_result.json
+
+# 测试数据
+**/tests/case_data/
