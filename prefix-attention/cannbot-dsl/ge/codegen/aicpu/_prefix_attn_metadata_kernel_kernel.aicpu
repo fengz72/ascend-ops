@@ -1,6 +1,10 @@
 #include "aicpu_api.h"
 #include "_prefix_attn_metadata_kernel_args.h"
 #include "_prefix_attn_metadata_kernel_body.inc"
+
+// Reentrancy: the body keeps its scratch in a per-thread TLS arena
+// (g_arena, see the body include) -- planner tasks running concurrently
+// on different AICPU cores each get their own scratch, no lock needed.
 __global__ __aicpu__ uint32_t _prefix_attn_metadata_kernel(_PrefixAttnMetadataArgs a)
 {
     g_arena_off = 0;

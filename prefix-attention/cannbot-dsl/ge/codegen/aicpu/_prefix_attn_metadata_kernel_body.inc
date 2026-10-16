@@ -1,6 +1,6 @@
 template <typename T> struct AArr { T* data; int64_t len; int64_t cap; };
-static uint8_t g_arena[1 << 22];
-static int64_t g_arena_off = 0;
+static thread_local uint8_t g_arena[1 << 22];
+static thread_local int64_t g_arena_off = 0;
 static void* arena_alloc(int64_t bytes) {
     int64_t base = (g_arena_off + 15) & ~int64_t(15);
     g_arena_off = base + bytes;

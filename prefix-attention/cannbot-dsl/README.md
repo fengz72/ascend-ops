@@ -2,7 +2,11 @@
 
 prefix-in-Q prefill attention:去重 TND 布局下,共享 prefix 的 Q/KV/输出只存一份、
 只算一份;各 batch 私有段 attend prefix KV + 自身私有 KV,causal;GQA
-(N1 % N2 == 0),D=64,fp16/bf16,fp32 score/PV 累加。
+(N1 % N2 == 0),D=64,fp32 score/PV 累加。
+
+**GE 交付件(`ge/`)只支持 fp16**,不支持 bf16——原因与恢复路径见
+`ge/README.md`「为什么只支持 fp16」。python 前端(`prefix_attn/`)是
+dtype 泛型的 DSL 内核源码,仅用于开发/验证,不打包交付。
 
 ## 安装
 
@@ -22,7 +26,7 @@ python 前端(`prefix_attn/`)是开发/验证源码,不打包:`cd cannbot-dsl`
 # eager 直调(python 前端,需 cannbotdsl;PEP 562 懒加载,import 不触发 DSL)
 from prefix_attn import prefix_attention
 
-# q [T,N1,64], k/v [T,N2,64] (npu, contiguous, fp16/bf16)
+# q [T,N1,64], k/v [T,N2,64] (npu, contiguous, fp16)
 # actual_seq_lengths: int32 [B+1] 段边界,b[0]=p>0,末项=T,严格递增
 out = prefix_attention(q, k, v, actual_seq_lengths)   # scale 默认 1/sqrt(64)
 ```
@@ -41,7 +45,7 @@ out = compiled(x, bounds)                             # 下沉到 GE PrefixAtten
 
 ## kernel 改动时再生成(唯一需要 cannbotdsl 的环节,需 NPU)
 
-`ge/codegen/` 是 GE 交付件的**构建源码**(非参考快照):macro kernel 的 fp16/bf16
+`ge/codegen/` 是 GE 交付件的**构建源码**(非参考快照):macro kernel 的 fp16
 AscendC + metadata AICPU planner。kernel(`prefix_attn/*.py`)改动后:
 
 ```bash
@@ -50,7 +54,7 @@ python ge/scripts/dump_kernel_src.py    # dump .asc/aicpu + 生成 ge/src/artifa
 bash ge/scripts/install.sh              # 重新编译安装
 ```
 
-> fp16/bf16 设备 kernel 符号同名,故分两个 .so;host invoke/schema 符号带各自
+> 交付件仅 fp16(原因见 `ge/README.md`);host invoke/schema 符号带特化
 > hash 区分(记录在 artifacts.h)。
 
 ## 目录
@@ -80,7 +84,6 @@ bash ge/scripts/install.sh              # 重新编译安装
 | case | 本算子@32AIC | FIA sm0 | FIA sm2/3 |
 |---|---:|---:|---:|
 | p20/130×10 fp16 | 17.14 us | 21.18 us | 17.29/17.34 us |
-| p25/193×10 bf16 | 17.84 us | 20.59 us | 17.94/17.94 us |
 
 FIA = `npu_fused_infer_attention_score`(口径 A 物化 prefix,多算 11–14% 行)。
 上表仅为 attention kernel 本身;每次调用另有独立的 AICPU metadata kernel

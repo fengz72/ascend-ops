@@ -4,9 +4,11 @@
 #   bash ge/scripts/install.sh
 #
 # This is the MODEL-INTEGRATION side.  It compiles the checked-in codegen'd
-# AscendC sources (ge/codegen/*.asc, codegen/aicpu/*) with bisheng
-# into kernel_fp16.so / kernel_bf16.so / aicpu_metadata.so, builds
-# libcust_opapi.so (GE custom op + launcher), and installs the OPP package
+# AscendC sources (ge/codegen/*.asc, UNMODIFIED) with bisheng into
+# kernel_fp16.so (fp16 only -- the pipeline runs fp16 and a single kernel
+# .so makes the dtype symbol question moot), builds the AICPU planner
+# (aicpu_metadata.so, per-thread TLS scratch) and libcust_opapi.so (GE custom
+# op + host planner + device-task launcher), and installs the OPP package
 # DIRECTLY INTO THE CANN DIRECTORY ($ASCEND_HOME_PATH/opp/op_graph).  NO
 # cannbotdsl and NO python DSL runtime are needed here -- only CANN/bisheng
 # + cmake.
@@ -49,7 +51,7 @@ if ! cmake -S "$GE_DIR" -B "$GE_DIR/build" -DCMAKE_BUILD_TYPE=Release \
   exit 1
 fi
 
-echo "[2/3] build (bisheng compiles .asc + aicpu; CXX builds libcust_opapi.so)"
+echo "[2/3] build (bisheng compiles .asc/.aicpu; CXX builds libcust_opapi.so)"
 cmake --build "$GE_DIR/build" -j"$(nproc)" > "$GE_DIR/build/build.log" 2>&1 || {
   tail -30 "$GE_DIR/build/build.log"; exit 1; }
 
