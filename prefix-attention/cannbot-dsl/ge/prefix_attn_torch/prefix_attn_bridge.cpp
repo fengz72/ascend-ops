@@ -51,7 +51,10 @@ at::Tensor prefix_attention(const at::Tensor &query, const at::Tensor &key,
                               : static_cast<float>(
                                     1.0 / std::sqrt(static_cast<double>(kHeadDim)));
   at::Tensor out = at::empty_like(query);
-  aclrtStream stream = c10_npu::getCurrentNPUStream().stream(false);
+  // Drain TorchNPU host submissions before issuing raw ACL work on the same
+  // device stream. stream(false) can overtake pending Q/K/V production,
+  // especially on the first inference; this is not a device synchronization.
+  aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
   const int status = prefix_attn_run_v2(
       out.data_ptr(), query.data_ptr(), key.data_ptr(), value.data_ptr(),
       actual_seq_lengths.data_ptr(), query.size(0), query.size(1), key.size(1),
