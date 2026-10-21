@@ -100,4 +100,42 @@ export ASCEND_CUSTOM_OPP_PATH="$ASCEND_OPP_PATH${ASCEND_CUSTOM_OPP_PATH:+:$ASCEN
 轮换输入数值与 bounds 内容，逐元素对比独立 FP32 causal-prefix/GQA 参考结果，
 并在模型卸载后确认 event 清理成功。
 
-已知限制：output size 增大可能踩踏内存；验证时应保持 shape 不变或变小。
+### 动态 shape 与输出扩容
+
+同一动态 shape 模型可在执行间改变 `T`、`batch` 和 bounds 内容；
+`N1=14、N2=2、D=64、FP16` 仍为内核特化约束。
+动态输出增大要求 GE 包含 `EagerOpExecutionContext::MallocOutputTensor`
+按本轮逻辑字节数检查已有容量、不足时重新分配的修复，并使用配套的
+GE Compiler / Executor。旧说明中的内存踩踏来自未扩容就复用旧输出缓冲区；
+以下已修复环境中未复现该问题。
+
+2026-10-21 在 A5 Ascend950PR、逻辑卡 1 上验证：
+CANN `9.3.0~weekly.20261014.01`，GE `upstream/9.3.0-beta.1`
+@ `cec5518fe3eb39dd7eec7b1fd124280b2ff6eaf2`，Compiler / Executor 由同一源码构建。
+两条路径各在同一个动态模型中依次执行下表 12 组 shape，包含增大、缩小、再增大，
+轮换输入数值与 bounds 内容。
+
+| 步骤 | T | batch | 输出字节数 | GE 自动分配输出 | 外部输出与哨兵 |
+|---|---|---|---|---|---|
+| 1 | 256 | 1 | 458752 | PASS | PASS |
+| 2 | 512 | 4 | 917504 | PASS | PASS |
+| 3 | 1024 | 8 | 1835008 | PASS | PASS |
+| 4 | 2048 | 16 | 3670016 | PASS | PASS |
+| 5 | 4096 | 32 | 7340032 | PASS | PASS |
+| 6 | 1024 | 16 | 1835008 | PASS | PASS |
+| 7 | 6144 | 32 | 11010048 | PASS | PASS |
+| 8 | 257 | 4 | 460544 | PASS | PASS |
+| 9 | 8192 | 32 | 14680064 | PASS | PASS |
+| 10 | 512 | 8 | 917504 | PASS | PASS |
+| 11 | 8192 | 32 | 14680064 | PASS | PASS |
+| 12 | 2048 | 16 | 3670016 | PASS | PASS |
+
+共 24 次执行、61,474,560 个元素均通过独立 FP32 causal-prefix/GQA 参考校验
+（容差 `abs_error <= 0.001 + 0.01 * abs(reference)`）。
+最大绝对误差 `0.000179022551`，两条路径的 RMSE 均为 `7.13565412e-06`。
+
+分配跟踪确认每条路径均在同一个节点 context 中实际触发 6 次容量不足后的扩容，
+输出从 448 KiB 增至 14 MiB；每次分配后的容量均足够，缩小时正确复用已有缓冲区。
+Q/K/V 和 bounds 回读未被改写；外部输出缓冲区前后各 4096 字节哨兵均完整；
+模型卸载后的 event 清理成功。验证范围为上述单模型串行 shape 切换，
+哨兵检查覆盖外部输出边界。

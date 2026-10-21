@@ -8,8 +8,10 @@
 // The planner is a sunk per-node task: it re-plans from the live bounds
 // contents on every run, no host round trip.
 //
-// custom_op_v2 envelope: one (shape, addresses) per graph
-// instance; bounds CONTENTS may vary, shapes may not.
+// With dynamic input descriptors, T, batch and bounds contents may change
+// between executions; N1/N2/D and dtype remain specialized (see artifacts.h).
+// Growing outputs requires GE's MallocOutputTensor capacity-check/reallocation
+// fix and matching GE compiler/executor components (see README.md).
 //
 // Device launchers: kernel_launcher.cc.  Eager entry: prefix_attn_eager.cc.
 #include <cmath>
