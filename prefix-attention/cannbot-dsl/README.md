@@ -4,7 +4,8 @@ prefix-in-Q prefill attention:去重 TND 布局下,共享 prefix 的 Q/KV/输出
 只算一份;各 batch 私有段 attend prefix KV + 自身私有 KV,causal;GQA
 (N1 % N2 == 0),D=64,fp32 score/PV 累加。
 
-**GE 交付件(`ge/`)只支持 fp16**,不支持 bf16——原因与恢复路径见
+**GE 交付件(`ge/`)要求 CANN ≥ 9.3.0，图模式仅提供 AICPU 辅流实现，且只支持 fp16**。
+不支持 bf16——原因与恢复路径见
 `ge/README.md`「为什么只支持 fp16」。python 前端(`prefix_attn/`)是
 dtype 泛型的 DSL 内核源码,仅用于开发/验证,不打包交付。
 
@@ -68,6 +69,8 @@ bash ge/scripts/install.sh              # 重新编译安装
 | `ge/` | GE 自定义算子工程(custom_op_v2,自包含):构建/安装/使用见 `ge/README.md` |
 
 ## 环境基线
+
+以下为历史 DSL 性能采集环境；当前 GE 交付件要求 CANN ≥ 9.3.0。
 
 | 项 | 版本 |
 |---|---|

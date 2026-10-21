@@ -1,21 +1,25 @@
 // PrefixAttention custom op: q/k/v/bounds -> out (fp16).
 //
 // The whole GE surface in one file: REG_OP prototype, IMPL_OP shape/dtype
-// inference, and the Execute class.  Execute submits, back to back on the
-// graph stream:
-//
-//   [metadata memset -> AICPU planner -> AIC kernel]
+// inference, and the Execute class. The memset and AICPU planner run on a
+// GE-managed auxiliary stream, bounded by main->aux and aux->main events;
+// the AIC kernel runs on the graph stream. Requires CANN >= 9.3.0.
 //
 // The planner is a sunk per-node task: it re-plans from the live bounds
 // contents on every run, no host round trip.
 //
-// custom_op_v2 (CANN 9.1.0) envelope: one (shape, addresses) per graph
+// custom_op_v2 envelope: one (shape, addresses) per graph
 // instance; bounds CONTENTS may vary, shapes may not.
 //
 // Device launchers: kernel_launcher.cc.  Eager entry: prefix_attn_eager.cc.
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <map>
+#include <mutex>
+#include <string>
+#include <tuple>
 
 #include "acl/acl_rt.h"
 #include "graph/custom_op.h"
@@ -26,6 +30,64 @@
 #include "artifacts.h"
 
 namespace {
+
+constexpr const char *kPlannerStreamKey = "prefix_attention.aicpu";
+struct PlannerEvents {
+  aclrtEvent input_ready = nullptr;
+  aclrtEvent metadata_ready = nullptr;
+};
+
+using EventKey = std::tuple<uintptr_t, uintptr_t, std::string>;
+std::mutex events_mutex;
+// No ACL calls from a static destructor: ACL may already be finalized.
+std::map<EventKey, PlannerEvents> event_pairs;
+
+aclError CurrentContext(aclrtContext &context) {
+  const auto ret = aclrtGetCurrentContext(&context);
+  return ret == ACL_SUCCESS && context == nullptr ? ACL_ERROR_INVALID_PARAM : ret;
+}
+
+aclError GetPlannerEvents(aclrtStream auxiliary, const char *node,
+                         PlannerEvents &events) {
+  if (auxiliary == nullptr || node == nullptr || node[0] == '\0') {
+    return ACL_ERROR_INVALID_PARAM;
+  }
+  aclrtContext context = nullptr;
+  auto ret = CurrentContext(context);
+  if (ret != ACL_SUCCESS) {
+    return ret;
+  }
+  const EventKey key{reinterpret_cast<uintptr_t>(context),
+                     reinterpret_cast<uintptr_t>(auxiliary), node};
+  const std::lock_guard<std::mutex> lock(events_mutex);
+  auto found = event_pairs.find(key);
+  if (found != event_pairs.end()) {
+    if (found->second.input_ready == nullptr || found->second.metadata_ready == nullptr) {
+      return ACL_ERROR_INVALID_PARAM;
+    }
+    events = found->second;
+    return ACL_SUCCESS;
+  }
+  constexpr uint32_t flags = ACL_EVENT_SYNC |
+                            ACL_EVENT_CAPTURE_STREAM_PROGRESS | ACL_EVENT_TIME_LINE;
+  PlannerEvents created;
+  ret = aclrtCreateEventWithFlag(&created.input_ready, flags);
+  if (ret != ACL_SUCCESS) {
+    return ret;
+  }
+  ret = aclrtCreateEventWithFlag(&created.metadata_ready, flags);
+  if (ret != ACL_SUCCESS) {
+    // No task has referenced this event yet. Keep it registered if destruction
+    // itself fails, so the explicit release hook can retry the cleanup.
+    if (aclrtDestroyEvent(created.input_ready) != ACL_SUCCESS) {
+      event_pairs.emplace(key, created);
+    }
+    return ret;
+  }
+  event_pairs.emplace(key, created);
+  events = created;
+  return ACL_SUCCESS;
+}
 
 constexpr size_t kInputQuery = 0U;
 constexpr size_t kInputKey = 1U;
@@ -55,6 +117,39 @@ ge::graphStatus InferDataTypeForPrefixAttention(
 
 }  // namespace
 
+extern "C" int prefix_attn_release_attached_events() {
+  aclrtContext context = nullptr;
+  auto ret = CurrentContext(context);
+  if (ret != ACL_SUCCESS) {
+    return ret;
+  }
+  const std::lock_guard<std::mutex> lock(events_mutex);
+  int first_error = ACL_SUCCESS;
+  for (auto it = event_pairs.begin(); it != event_pairs.end();) {
+    if (std::get<0>(it->first) != reinterpret_cast<uintptr_t>(context)) {
+      ++it;
+      continue;
+    }
+    for (auto *event : {&it->second.input_ready, &it->second.metadata_ready}) {
+      if (*event == nullptr) {
+        continue;
+      }
+      ret = aclrtDestroyEvent(*event);
+      if (ret == ACL_SUCCESS) {
+        *event = nullptr;
+      } else if (first_error == ACL_SUCCESS) {
+        first_error = ret;
+      }
+    }
+    if (it->second.input_ready == nullptr && it->second.metadata_ready == nullptr) {
+      it = event_pairs.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  return first_error;
+}
+
 namespace ge {
 
 // Op prototype (fp16-only, ge/README.md).  The type name must match the
@@ -75,8 +170,11 @@ IMPL_OP(PrefixAttention)
 
 // Execute only: shape inference is the IMPL_OP above; eager calls bypass
 // this class (they go via prefix_attn_eager.cc).
-class PrefixAttention final : public EagerExecuteOp {
+class PrefixAttention final : public EagerExecuteOp, public ResourceUsageReporter {
  public:
+  graphStatus DeclareResourceUsage(gert::ResourceUsageContext &ctx) override {
+    return ctx.ReportAttachedStream({AscendString(kPlannerStreamKey)});
+  }
   graphStatus Execute(gert::EagerOpExecutionContext *ctx) override {
     const gert::Tensor *query = ctx->GetInputTensor(kInputQuery);
     const gert::Tensor *key = ctx->GetInputTensor(kInputKey);
@@ -128,6 +226,14 @@ class PrefixAttention final : public EagerExecuteOp {
     }
 
     aclrtStream stream = ctx->GetStream();
+    const aclrtStream planner_stream =
+        ctx->RequestAttachedStream(kPlannerStreamKey);
+    PlannerEvents events;
+    if (planner_stream == nullptr || planner_stream == stream ||
+        GetPlannerEvents(planner_stream, ctx->GetNodeName(), events) != ACL_SUCCESS) {
+      std::cerr << "[PrefixAttention] attached stream/event allocation failed" << std::endl;
+      return GRAPH_FAILED;
+    }
 
     // metadata scratch: zero-init is the planner's contract
     const size_t meta_bytes =
@@ -137,14 +243,29 @@ class PrefixAttention final : public EagerExecuteOp {
       std::cerr << "[PrefixAttention] MallocWorkSpace failed" << std::endl;
       return GRAPH_FAILED;
     }
-    if (aclrtMemsetAsync(metadata_dev, meta_bytes, 0, meta_bytes, stream) !=
+    // The dependency also protects GE's workspace reuse from preceding tasks.
+    // Record wait+reset tasks, like GE EventWaitTaskInfo: model replay must
+    // consume this execution's signal, rather than a prior execution's signal.
+    if (aclrtRecordEvent(events.input_ready, stream) != ACL_SUCCESS ||
+        aclrtStreamWaitEvent(planner_stream, events.input_ready) != ACL_SUCCESS ||
+        aclrtResetEvent(events.input_ready, planner_stream) != ACL_SUCCESS) {
+      std::cerr << "[PrefixAttention] main-to-planner synchronization failed" << std::endl;
+      return GRAPH_FAILED;
+    }
+    if (aclrtMemsetAsync(metadata_dev, meta_bytes, 0, meta_bytes, planner_stream) !=
         ACL_SUCCESS) {
       std::cerr << "[PrefixAttention] metadata memset failed" << std::endl;
       return GRAPH_FAILED;
     }
-    if (prefix_attn::LaunchAicpuPlanner(stream, bounds->GetAddr(), metadata_dev,
+    if (prefix_attn::LaunchAicpuPlanner(planner_stream, bounds->GetAddr(), metadata_dev,
                                         static_cast<uint32_t>(bounds_len), kN1,
                                         kN2, prefix_attn::kAicCores) != 0) {
+      return GRAPH_FAILED;
+    }
+    if (aclrtRecordEvent(events.metadata_ready, planner_stream) != ACL_SUCCESS ||
+        aclrtStreamWaitEvent(stream, events.metadata_ready) != ACL_SUCCESS ||
+        aclrtResetEvent(events.metadata_ready, stream) != ACL_SUCCESS) {
+      std::cerr << "[PrefixAttention] planner-to-main synchronization failed" << std::endl;
       return GRAPH_FAILED;
     }
     if (prefix_attn::LaunchAttnKernel(stream, output->GetAddr(),

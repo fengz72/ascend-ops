@@ -5,8 +5,8 @@
 # Kernel artifacts are linked into libcust_opapi.so (DT_NEEDED + RUNPATH
 # $ORIGIN/artifacts) -- no dlopen at runtime.
 #
-# Outputs, installed into $ASCEND_HOME_PATH/opp/op_graph (GE finds them via
-# ASCEND_CUSTOM_OPP_PATH=$ASCEND_HOME_PATH/opp):
+# Outputs, installed into $ASCEND_OPP_PATH/op_graph.
+# GE finds this root through ASCEND_CUSTOM_OPP_PATH:
 #   kernel_fp16.so    macro kernel, fp16-only (see README)
 #   aicpu_metadata.so AICPU planner
 #   libcust_opapi.so  GE custom op + launchers (CXX)
@@ -21,6 +21,10 @@ if(NOT ASCEND_HOME_PATH)
 endif()
 if(NOT ASCEND_HOME_PATH)
   message(FATAL_ERROR "ASCEND_HOME_PATH is empty. Source CANN set_env.sh first.")
+endif()
+set(ASCEND_OPP_PATH "$ENV{ASCEND_OPP_PATH}")
+if(NOT ASCEND_OPP_PATH)
+  message(FATAL_ERROR "ASCEND_OPP_PATH is empty. Source CANN set_env.sh first.")
 endif()
 set(NPU_ARCH "dav-3510" CACHE STRING "bisheng --npu-arch (board-specific; Ascend950PR=dav-3510)")
 set(BISHENG "${ASCEND_HOME_PATH}/bin/bisheng")
@@ -70,6 +74,18 @@ set(KERNEL_SOS "${K_SO}")
 # Sunk per-node task, re-plans from live bounds on every graph run.  The
 # kernel's scratch is a per-thread TLS arena -- safe under concurrency.
 set(HCC "${ASCEND_HOME_PATH}/toolkit/toolchain/hcc/aarch64-target-linux-gnu/include")
+file(GLOB HCC_CXX_HEADERS "${HCC}/c++/*/cstdint")
+if(NOT HCC_CXX_HEADERS)
+  message(FATAL_ERROR "HCC C++ headers not found under ${HCC}/c++")
+endif()
+foreach(header IN LISTS HCC_CXX_HEADERS)
+  get_filename_component(candidate_dir "${header}" DIRECTORY)
+  get_filename_component(candidate_version "${candidate_dir}" NAME)
+  if(NOT DEFINED HCC_CXX_VERSION OR candidate_version VERSION_GREATER HCC_CXX_VERSION)
+    set(HCC_CXX_VERSION "${candidate_version}")
+    set(HCC_CXX_INCLUDE "${candidate_dir}")
+  endif()
+endforeach()
 set(AICPU_DIR "${CODEGEN_DIR}/aicpu")
 set(AICPU_KERNEL_SRC "${AICPU_DIR}/_prefix_attn_metadata_kernel_kernel.aicpu")
 set(AICPU_SHIM_SRC "${AICPU_DIR}/_prefix_attn_metadata_kernel_shim.asc")
@@ -83,9 +99,9 @@ add_custom_command(
           "--cce-aicpu-L${ASCEND_HOME_PATH}/lib64/device/lib64"
           "--cce-aicpu-laicpu_api"
           "--cce-aicpu-sysroot=${ASCEND_HOME_PATH}/toolkit/toolchain/hcc/sysroot"
-          -isystem "${HCC}" -isystem "${HCC}/c++/7.3.0"
-          -isystem "${HCC}/c++/7.3.0/aarch64-target-linux-gnu"
-          -isystem "${HCC}/c++/7.3.0/backward"
+          -isystem "${HCC}" -isystem "${HCC_CXX_INCLUDE}"
+          -isystem "${HCC_CXX_INCLUDE}/aarch64-target-linux-gnu"
+          -isystem "${HCC_CXX_INCLUDE}/backward"
           --cce-aicpu-launch-with-interface
           -x aicpu "${AICPU_KERNEL_SRC}" -o "${AICPU_KOBJ}"
   COMMAND ${BENV} "${BISHENG}" -fPIC --npu-arch=${NPU_ARCH} -c -O3
@@ -131,10 +147,25 @@ target_link_directories(cust_opapi PRIVATE
 target_link_libraries(cust_opapi PRIVATE ascendcl acl_rt register lowering dl
   kernel_fp16_artifact aicpu_metadata_artifact)
 
-# --- OPP install directly into the CANN directory ---
-# A CANN upgrade wipes this directory -- re-run install.sh afterwards.
-set(OPP_ROOT "${ASCEND_HOME_PATH}/opp")
-set(OPP_LIB "${OPP_ROOT}/op_graph/lib/linux/aarch64")
+include(CheckCXXSourceCompiles)
+# CANN can change between configurations or be reinstalled at the same path.
+# Never reuse an interface probe from a previous installation.
+unset(PREFIX_ATTN_HAS_ATTACHED_STREAM_API CACHE)
+unset(PREFIX_ATTN_HAS_ATTACHED_STREAM_API)
+set(CMAKE_REQUIRED_INCLUDES ${GE_INCLUDES})
+check_cxx_source_compiles("#include <graph/custom_op.h>
+  int main() {
+    using StreamApi = decltype(&gert::EagerOpExecutionContext::RequestAttachedStream);
+    using ReportApi = decltype(&gert::ResourceUsageContext::ReportAttachedStream);
+    using Reporter = ge::ResourceUsageReporter;
+    return 0;
+  }" PREFIX_ATTN_HAS_ATTACHED_STREAM_API)
+unset(CMAKE_REQUIRED_INCLUDES)
+if(NOT PREFIX_ATTN_HAS_ATTACHED_STREAM_API)
+  message(FATAL_ERROR "PrefixAttention requires CANN >= 9.3.0 with GE RequestAttachedStream and ResourceUsageReporter")
+endif()
+
+# --- Install into the OPP directory provided by CANN ---
+set(OPP_LIB "${ASCEND_OPP_PATH}/op_graph/lib/linux/aarch64")
 install(TARGETS cust_opapi DESTINATION "${OPP_LIB}")
 install(FILES ${KERNEL_SOS} DESTINATION "${OPP_LIB}/artifacts")
-

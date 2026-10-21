@@ -1,5 +1,7 @@
 # PrefixAttention — GE 自定义算子(custom_op_v2)
 
+**最低环境要求：CANN ≥ 9.3.0。GE 图模式仅提供 AICPU planner 辅流实现。**
+
 单节点 `PrefixAttention`:Execute 内双 launch(AICPU metadata planner + macro
 attention kernel),kernel 由 CMake 调 bisheng 从签入的 AscendC 源码
 (`codegen/`)编译,构建与运行均**无需 cannbotdsl**。
@@ -10,15 +12,17 @@ attention kernel),kernel 由 CMake 调 bisheng 从签入的 AscendC 源码
 source /usr/local/Ascend/ascend-toolkit/latest/set_env.sh   # 或任一 CANN 环境
 
 bash ge/scripts/install.sh    # bisheng 编 .asc/aicpu + CXX 编 libcust_opapi.so,
-                              # 直接装入 CANN 目录 $ASCEND_HOME_PATH/opp/op_graph/
+                              # 装入 $ASCEND_OPP_PATH/op_graph/
 ```
 
 - (仅 kernel 改动时)先重新 dump AscendC 源码,需 cannbotdsl + NPU:
   `python ge/scripts/dump_kernel_src.py`
 - 换板:`NPU_ARCH=<arch> bash ge/scripts/install.sh`(默认 dav-3510/Ascend950PR)
-- CANN 升级会清空 `$ASCEND_HOME_PATH/opp`,需重跑 `install.sh`
+- 安装目录直接使用 CANN 提供的 `$ASCEND_OPP_PATH`，需先 source `set_env.sh`。
+  CANN 升级后重新 source 环境并重跑 `install.sh`。
+- 每次 CMake 配置均重新编译检查辅流接口，支持切换 CANN 或原路径重装后重试。
 - 非 torch 侧(GE Session/ATC)需:
-  `export ASCEND_CUSTOM_OPP_PATH="$ASCEND_HOME_PATH/opp:$ASCEND_CUSTOM_OPP_PATH"`
+  `export ASCEND_CUSTOM_OPP_PATH="$ASCEND_OPP_PATH${ASCEND_CUSTOM_OPP_PATH:+:$ASCEND_CUSTOM_OPP_PATH}"`
 
 ## 为什么只支持 fp16(不支持 bf16)
 
@@ -59,3 +63,41 @@ out = compiled(x, bounds)
   `bounds` int32 `[B+1]`(首项=prefix 长度>0,末项=T,严格递增);`scale<=0` 时取
   `1/sqrt(64)`;输出 shape/dtype 同 query
 - 核数:GE 侧固定 16;python 侧运行时经 torch_npu 查询设备(上限 36)
+
+## GE AICPU 辅流版本
+
+GE 图模式的 metadata 清零和 AICPU planner 固定放在
+`RequestAttachedStream("prefix_attention.aicpu")` 上，Attention kernel 仍在主流。
+CMake 必须通过辅流与资源申报接口检查；已在 CANN 9.3.0 B140 验证。
+
+```text
+主流：前序任务 -> record(input_ready) -> wait/reset(metadata_ready) -> Attention
+辅流：           wait/reset(input_ready) -> memset -> planner -> record(metadata_ready)
+```
+
+两个方向的 wait 后都需要 reset，避免模型重复重放时使用上一次执行的 event 信号。
+
+GE 管理辅流。event 按 ACL context、模型辅流、节点名隔离，支持多个模型使用
+相同节点名。**调用方必须在当前 context 中所有相关模型完成执行并卸载之后、
+`GEFinalize` 之前，调用 `prefix_attn_release_attached_events()`**；此函数返回
+ACL 状态码。清理期间不能并发加载或执行相关模型。不会在静态析构中调用 ACL。
+C++ 调用方在使用处声明 `extern "C" int prefix_attn_release_attached_events();`。
+event 管理与清理实现集中在 `src/prefix_attention_op.cc`，不再额外提供资源头文件或测试计数接口。
+在接入现有模型服务前，需将此清理调用接到服务的模型卸载流程中。
+
+以下命令在仓库根目录执行，安装到当前 `$ASCEND_OPP_PATH`：
+
+```bash
+source /usr/local/Ascend/ascend-toolkit/latest/set_env.sh
+GE_SRC=prefix-attention/cannbot-dsl/ge
+cmake -S "$GE_SRC" -B "$GE_SRC/build-aux" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$GE_SRC/build-aux" -j4
+cmake --install "$GE_SRC/build-aux"
+export ASCEND_CUSTOM_OPP_PATH="$ASCEND_OPP_PATH${ASCEND_CUSTOM_OPP_PATH:+:$ASCEND_CUSTOM_OPP_PATH}"
+```
+
+基础正确性验证可使用固定 `T=2048, batch=16, N1=14, N2=2, D=64, FP16`，
+轮换输入数值与 bounds 内容，逐元素对比独立 FP32 causal-prefix/GQA 参考结果，
+并在模型卸载后确认 event 清理成功。
+
+已知限制：output size 增大可能踩踏内存；验证时应保持 shape 不变或变小。

@@ -65,16 +65,15 @@ def _cann_home():
 def find_opp_root():
     """定位GE交付件OPP根(未安装返回None)。
 
-    $ASCEND_CUSTOM_OPP_PATH 各条目,否则 install.sh 的标准安装位
-    ($ASCEND_HOME_PATH/opp, 含未设env时的toolkit默认路径)。
+    依次查找 $ASCEND_CUSTOM_OPP_PATH 和 CANN 的 $ASCEND_OPP_PATH。
     """
     candidates = []
     for entry in os.environ.get("ASCEND_CUSTOM_OPP_PATH", "").split(":"):
         if entry:
             candidates.append(Path(entry))
-    ascend_home = _cann_home()
-    if ascend_home:
-        candidates.append(Path(ascend_home) / "opp")   # install.sh 安装位
+    opp_path = os.environ.get("ASCEND_OPP_PATH")
+    if opp_path:
+        candidates.append(Path(opp_path))
     for root in candidates:
         if _deliverable(root).exists():
             return root
@@ -87,8 +86,8 @@ def mount_opp():
     if root is None:
         raise RuntimeError(
             "GE deliverable not found; run ge/scripts/install.sh first "
-            "(looked in $ASCEND_CUSTOM_OPP_PATH, $ASCEND_HOME_PATH/opp "
-            f"and {_DEFAULT_CANN}/opp)")
+            "(looked in $ASCEND_CUSTOM_OPP_PATH and $ASCEND_OPP_PATH; "
+            "source CANN set_env.sh first)")
     root = str(root)
     current = os.environ.get("ASCEND_CUSTOM_OPP_PATH", "")
     if root not in current.split(":"):
@@ -97,7 +96,7 @@ def mount_opp():
     return root
 
 
-OPP_ROOT = mount_opp()
+mount_opp()
 
 
 # --- JIT eager bridge: torch tensors -> C ABI of libcust_opapi.so ---
