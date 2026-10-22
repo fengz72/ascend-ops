@@ -165,8 +165,7 @@ public:
 
         // 输出0: attention_out (shape/dtype/format同query)
         gert::Tensor *outT = ctx->MallocOutputTensor(0, in[IN_QUERY]->GetShape(), in[IN_QUERY]->GetFormat(),
-                                                     in[IN_QUERY]->GetDataType(),
-                                                     static_cast<size_t>(in[IN_QUERY]->GetSize()));
+                                                     in[IN_QUERY]->GetDataType());
         OP_CHECK_NULL_WITH_CONTEXT(ctx, outT);
 
         // 构造acl描述子: key/value为单元素tensorlist

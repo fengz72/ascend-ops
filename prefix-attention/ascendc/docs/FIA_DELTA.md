@@ -73,6 +73,11 @@
 ### 2.10 `op_host/fia_tiling_impl/fused_infer_attention_score_tiling_info_parser.h`
 - 仅 include 路径改动（`../common_impl/...` 替代源仓相对路径），无行为变化
 
+### 2.11 CANN 9.1.0 日志接口适配
+- `op_host/common_impl/include/err/ops_err.h`：`OpLogSub` 的模块标识由 `OP` 改为 CANN 9.1.0 日志头提供的 `OP_MODULE_ID`。
+- `op_host/common_impl/include/tiling_base/tiling_base.h`：`CheckLogLevel` 同步使用 `OP_MODULE_ID`。
+- 两处均为 host 日志接口适配，不改变 tiling 或 kernel 行为，无需行为门控；升级源仓时检查新版是否已完成同等适配。
+
 ## 3. 本算子自有文件（非 vendored，全部为新增）
 
 | 文件 | 职责 |
@@ -89,6 +94,10 @@
 | `op_graph/prefix_infer_attention_score_proto.h` | 图融合识别用头（输入/attr 镜像 def，文档注释须与现行契约一致） |
 | `torch_binding/` | torch 接入独立包（schema+eager+torchair converter，aclnn 符号经 dlopen 解析） |
 | `tests/` | test_torch_binding.py（三层验收：eager vs CPU golden / `.tensor` vs `.default` bit 级 / GE 整图 vs eager bit 级；全 PASS 为准出） |
+
+GE 接入适配件要求 **CANN 9.1.0 及以上**，输出通过四参数
+`MallocOutputTensor(index, shape, format, dtype)` 分配，由 context 推导所需内存大小。
+构建默认从 `ASCEND_HOME_PATH` 选择 CANN，源仓 `origin/9.0.0` 仅表示代码基线。
 
 ## 4. 关键机制（改动时必须保持的不变量）
 

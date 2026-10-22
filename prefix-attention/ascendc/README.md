@@ -27,19 +27,27 @@ aclnnPrefixInferAttentionScore(
 | 项 | 版本 |
 |---|---|
 | SoC | Ascend910_93（芯片实测 Ascend910_9382） |
-| CANN | 9.0.0 |
+| CANN | **9.1.0 及以上（最低要求）** |
 | OS | openEuler 24.03 aarch64 |
 | Python | 3.11.15 |
 | torch / torch_npu | 2.9.0+cpu / 2.9.0.post2 |
 | 源仓基线 | ops-transformer `origin/9.0.0` @ e88633357（分支基点） |
 
+本算子构建与运行需要 **CANN 9.1.0 及以上**。GE 接入适配件使用四参数
+`gert::EagerOpExecutionContext::MallocOutputTensor(index, shape, format, dtype)`
+接口，由 context 根据 shape 和 dtype 分配输出内存；不兼容旧版五参数接口。
+源仓 `origin/9.0.0` 仅表示 vendored FIA 代码基线，不代表本算子的 CANN 运行版本要求。
+
 ## 3. 构建与安装
 
 ```bash
-cd prefix_infer_attention_score
+cd prefix-attention/ascendc
 source /usr/local/Ascend/ascend-toolkit/set_env.sh   # 设置ASCEND_HOME_PATH等
 bash build.sh        # ~4min, 产物 build_out/custom_opp_openEuler_aarch64.run
 ```
+
+构建默认使用 `set_env.sh` 设置的 `ASCEND_HOME_PATH`，也可通过 CMake
+`-DASCEND_CANN_PACKAGE_PATH=/path/to/cann` 显式指定 CANN 安装目录。
 
 安装（安装后目录为 `$ASCEND_HOME_PATH/opp/vendors/custom_prefix_attn/`）：
 

@@ -6,7 +6,7 @@ N1%N2==0,D=64,fp16/bf16)的两种实现,按目录分开维护:
 
 | 目录 | 技术路线 | 目标环境 | 入口 |
 |---|---|---|---|
-| [`ascendc/`](ascendc/README.md) | AscendC C++ 自定义算子,vendored FIA 模板链(源仓 ops-transformer `origin/9.0.0` @ e88633357),aclnn/torch_binding 交付 | Ascend910_93,CANN 9.0.0,Python 3.11 | `ascendc/build.sh`;测试 `ascendc/tests/` |
+| [`ascendc/`](ascendc/README.md) | AscendC C++ 自定义算子,vendored FIA 模板链(源仓 ops-transformer `origin/9.0.0` @ e88633357),aclnn/torch_binding 交付 | Ascend910_93,**CANN 9.1.0 及以上**,Python 3.11 | `ascendc/build.sh`;测试 `ascendc/tests/` |
 | [`cannbot-dsl/`](cannbot-dsl/README.md) | CANNBotDSL(Python DSL)macro pipeline kernel(K@Q^T 数据通路)+ AICPU metadata planner,含 codegen 出的 AscendC 代码快照 | Ascend950PR(32 AIC),CANN 9.2.0-beta.2,cannbotdsl 0.7.0,torch_npu 2.10 | `import prefix_attn`;测试 `cannbot-dsl/tests/` |
 
 两者接口形态不同:ascendc 版走 aclnn 算子签名(cumsum 形式
