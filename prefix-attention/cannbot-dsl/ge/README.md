@@ -70,19 +70,43 @@ GE 图模式的 metadata 清零和 AICPU planner 固定放在
 `RequestAttachedStream("prefix_attention.aicpu")` 上，Attention kernel 仍在主流。
 CMake 必须通过辅流与资源申报接口检查；已在 CANN 9.3.0 B140 验证。
 
+`bounds` 的 dtype 为 int32。内部属性 `bounds_preloaded` 默认 false，
+保持输入就绪同步，兼容静态图内的输入搬运和图内生成的 bounds。
+TorchAir converter 仅对带原生适配导出器输入标记的 bounds、直接 Data 输入、
+bounds 与 query 均有符号动态维度时设置该属性为 true；当前 Qwen 动态执行路径已通过实际地址跟踪确认直接读取外部输入。
+调用方必须先完成同步 H2D，再启动图执行，不能仅凭 dtype 就假定输入已经就绪。
+普通未标记的 torch.compile 输入保持默认同步，不自动推断异步生产者已完成。
+
 ```text
-主流：前序任务 -> record(input_ready) -> wait/reset(metadata_ready) -> Attention
-辅流：           wait/reset(input_ready) -> memset -> planner -> record(metadata_ready)
+Qwen 动态直接输入（bounds_preloaded=true）：
+执行前：同步 H2D(int32 bounds) 完成
+主流：Q/K/V、RoPE及其他计算 -> wait/reset(metadata_ready) -> Attention
+辅流：memset -> planner -> record(metadata_ready)
+
+其他路径（bounds_preloaded=false，默认）：
+主流：输入搬运或生产者完成 -> record(input_ready) -> wait/reset(metadata_ready) -> Attention
+辅流：wait/reset(input_ready) -> memset -> planner -> record(metadata_ready)
 ```
 
-两个方向的 wait 后都需要 reset，避免模型重复重放时使用上一次执行的 event 信号。
+planner 不读取 Q/K/V。已预加载路径删除每层主流到辅流等待，
+所有路径保留 metadata_ready 的 wait/reset，保证 Attention 读取本轮规划结果。
+静态 GE 图可能把外部输入搬到模型内部地址，不能无条件删除 input_ready。
+V1 下沉路径重放已录制任务，RT2 动态路径由 Execute 实际下发任务；
+提前执行的幅度取决于任务下发和调度，需通过 profiling 确认。
 
-GE 管理辅流。event 按 ACL context、模型辅流、节点名隔离，支持多个模型使用
+metadata 使用按 ACL context、模型辅流、节点名隔离的独立 16 KiB 缓冲区，
+避免辅流提前清零时覆盖主流分配器正在复用的 workspace。
+已预加载路径每节点只申请一个 metadata_ready event，其他路径另有 input_ready。
+24层模型每实例有效 metadata 共384 KiB，不含分配器对齐开销。
+全局锁仅保护主机侧资源表，不包围 kernel 发射或设备等待。
+提前规划路径同一模型实例必须完成上一次执行后再调用；多个实例各自持有资源。
+
+GE 管理辅流。event 和 metadata 按 ACL context、模型辅流、节点名隔离，支持多个模型使用
 相同节点名。**调用方必须在当前 context 中所有相关模型完成执行并卸载之后、
 `GEFinalize` 之前，调用 `prefix_attn_release_attached_events()`**；此函数返回
-ACL 状态码。清理期间不能并发加载或执行相关模型。不会在静态析构中调用 ACL。
+ACL 状态码，并释放 event 与 metadata 缓冲区。清理期间不能并发加载或执行相关模型。不会在静态析构中调用 ACL。
 C++ 调用方在使用处声明 `extern "C" int prefix_attn_release_attached_events();`。
-event 管理与清理实现集中在 `src/prefix_attention_op.cc`，不再额外提供资源头文件或测试计数接口。
+资源管理与清理实现集中在 `src/prefix_attention_op.cc`，不再额外提供资源头文件或测试计数接口。
 在接入现有模型服务前，需将此清理调用接到服务的模型卸载流程中。
 
 以下命令在仓库根目录执行，安装到当前 `$ASCEND_OPP_PATH`：
@@ -139,3 +163,16 @@ CANN `9.3.0~weekly.20261014.01`，GE `upstream/9.3.0-beta.1`
 Q/K/V 和 bounds 回读未被改写；外部输出缓冲区前后各 4096 字节哨兵均完整；
 模型卸载后的 event 清理成功。验证范围为上述单模型串行 shape 切换，
 哨兵检查覆盖外部输出边界。
+
+### 2026-10-22 输入直传与提前规划验证
+
+A5 Qwen的bounds输入改为int32后，100个case、2400次planner的地址跟踪确认
+直接读取同步H2D完成的外部输入，无额外bounds搬运；24层均开启bounds_preloaded。
+100-case端到端输出共12,800个值与保留入口同步的基线逐位一致，case-0000
+通过独立FP32基线。静态图基础用例保留必要输入同步，3次执行、5,505,024个元素
+通过独立FP32参考；四个动态图实例开启提前规划，12次执行、22,020,096个元素
+通过参考，最大绝对误差0.000186502934，清理接口均返回成功。
+
+固定实际shape为T=2048、batch16、N1=14、N2=2、D=64、FP16，
+执行间轮换Q/K/V和bounds内容。同为int32的静态图仍可能发生模型内部输入搬运，
+不能据此删除默认输入同步。当前版本的自动提前规划仅针对原生适配导出器的已验证动态直接输入。

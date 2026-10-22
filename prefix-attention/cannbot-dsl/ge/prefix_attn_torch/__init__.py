@@ -174,6 +174,19 @@ def _assert_defaults_match_schema(converter):
                 f"converter={cval!r}")
 
 
+def _has_preloaded_bounds(query, bounds):
+    # The native adapter exporter marks its inputs and its runner completes
+    # H2D before graph execution. Ordinary torch.compile inputs may still
+    # have asynchronous producers, so direct Data alone is not sufficient.
+    marker = bounds.node.attr.get("_ge_adapter_name")
+    return (
+        bounds.node.type == "Data"
+        and marker is not None and marker.s == b"actual_seq_lengths"
+        and any(isinstance(dim, torch.SymInt) for dim in (bounds.symsize or ()))
+        and any(isinstance(dim, torch.SymInt) for dim in (query.symsize or ()))
+    )
+
+
 def register_converter():
     try:
         import torchair  # noqa: F401
@@ -194,13 +207,15 @@ def register_converter():
         actual_seq_lengths: Tensor, scale: float = 0.0,
         meta_outputs: TensorSpec = None,
     ):
+        bounds_preloaded = _has_preloaded_bounds(query, actual_seq_lengths)
         return ge_custom_op(
             "PrefixAttention",
             inputs={
                 "query": query, "key": key, "value": value,
                 "actual_seq_lengths": actual_seq_lengths,
             },
-            attrs={"scale": ge_attr.Float(float(scale))},
+            attrs={"scale": ge_attr.Float(float(scale)),
+                   "bounds_preloaded": ge_attr.Bool(bounds_preloaded)},
             outputs=["attention_out"],
         )
 
