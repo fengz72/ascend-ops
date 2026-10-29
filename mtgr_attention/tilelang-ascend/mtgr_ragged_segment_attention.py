@@ -664,6 +664,7 @@ def mtgr_ragged_segment_attention(
     num_stages=14,
     kv_group=1,
     cross_interval=2,
+    rule1_seg_idx=1,
 ):
     assert block_size == 128, f"block_size must be 128, got {block_size}"
     block_N = block_size
@@ -694,6 +695,7 @@ def mtgr_ragged_segment_attention(
         core_num=core_num,
         num_stages=num_stages,
         cross_interval=cross_interval,
+        rule1_seg_idx=rule1_seg_idx,
     )
 
     func(

@@ -40,9 +40,6 @@ def _ensure_mask_lib():
     _MASK_LIB_LOADED = True
 
 
-_ensure_mask_lib()
-from test_perf import build_mask_inputs, run_mask_op_timed, run_mask_op_once
-
 KERNEL_NAMES = {
     "sparse-fa": "main_kernel",
     "fia": "FusedInferAttentionScore",
@@ -203,6 +200,7 @@ def run_kernel(data, config):
         kv_group=kv_group,
         num_stages=num_stages,
         cross_interval=cross_interval,
+        rule1_seg_idx=config.get("rule1_seg_idx", 1),
     )
 
 
@@ -367,6 +365,9 @@ def _run_target_perf(target, data, config, case_index, log_dir):
         q, k, v, mask, seq_lens, scale = build_fia_inputs(config["seg_lengths"], config["rules"], config["D"], config["H"])
         total_us = run_fia_timed(q, k, v, mask, seq_lens, scale, warmup=TOTAL_WARMUP, repeat=TOTAL_REPEAT)
     elif target == "mask":
+        _ensure_mask_lib()
+        from test_perf import build_mask_inputs, run_mask_op_timed
+
         mask_tensor, seg_offsets, seg_rules, q_starts, _ = build_mask_inputs(config["seg_lengths"], config["rules"])
         total_us = run_mask_op_timed(mask_tensor, seg_offsets, seg_rules, q_starts, warmup=TOTAL_WARMUP, repeat=TOTAL_REPEAT)
     else:
@@ -449,6 +450,9 @@ def main():
                 run_fia_once(q, k, v, mask, seq_lens, scale)
                 torch.npu.synchronize()
         elif target == "mask":
+            _ensure_mask_lib()
+            from test_perf import build_mask_inputs, run_mask_op_once
+
             mask_tensor, seg_offsets, seg_rules, q_starts, T = build_mask_inputs(config["seg_lengths"], config["rules"])
             for _ in range(total):
                 run_mask_op_once(mask_tensor, seg_offsets, seg_rules, q_starts)
@@ -625,6 +629,9 @@ def main():
                     row[k] = f"{v:.4f}"
             rows.append(row)
         _write_csv(os.path.join(args.output_dir, "compare_results.csv"), rows, _COMPARE_FIELDS)
+
+    if args.mode == "accuracy" and failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

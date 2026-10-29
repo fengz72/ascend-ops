@@ -485,3 +485,33 @@ _perf_test_indices = {
 for _idx in range(len(test_configs)):
     test_configs[_idx]["multi_seed"] = _idx in _multi_seed_indices
     test_configs[_idx]["perf_test"] = _idx in _perf_test_indices
+
+
+# Rule 1 at segment index 0: preserve existing case indices and flags above.
+_two_segment_rule_patterns = [
+    # Aligned rule-1 segment spans two Q tiles; catches missing future keys.
+    _make_pattern([[256, 256]], [1, 2]),
+    # Both segment boundaries and the final tile are unaligned.
+    _make_pattern([[257, 259]], [1, 2]),
+    # A Q tile contains both the short rule-1 segment and rule-2 queries.
+    _make_pattern([[8, 300]], [1, 2]),
+    # Ragged batches with different rule-1 boundaries.
+    _make_pattern([[256, 256], [129, 387], [8, 300]], [1, 2]),
+    # Prefix cache ends inside rule 1.
+    _make_pattern([[256, 256]], [1, 2], [128]),
+    # Prefix ends at rule-1 boundary, inside rule 1, or is absent.
+    _make_pattern([[256, 256], [257, 259], [8, 300]], [1, 2], [256, 128, 0]),
+]
+
+two_segment_rule_test_configs = [
+    {
+        "H": 8,
+        "D": 128,
+        **pattern,
+        "rule1_seg_idx": 0,
+        "multi_seed": True,
+        "perf_test": False,
+    }
+    for pattern in _two_segment_rule_patterns
+]
+test_configs.extend(two_segment_rule_test_configs)
