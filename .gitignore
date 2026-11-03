@@ -1,28 +1,31 @@
+
+!mega-gdn-prefill/vendor/cmake/third_party/build/
+# Python生成物
+# 上游 xllm_ops 以 build/ 命名的源码目录（abseil/protobuf 补丁），避免被上面的 build/ 规则忽略
+# 日志与临时文件
 # 构建产物
+# 测试数据
+# 编辑器/系统
+**/tests/case_data/
+**/vendor/third_party/
+*.egg-info/
+*.log
+*.pyc
+*.swp
+.DS_Store
+.cache/
+.dump/
+.idea/
+.pytest_cache/
+.vscode/
+__pycache__/
 build/
 build_out/
 dist/
-host_native_tiling/
-
-# Python生成物
-__pycache__/
-*.pyc
-.pytest_cache/
-*.egg-info/
-.dump/
-
-# 编辑器/系统
-.vscode/
-.idea/
-*.swp
-.DS_Store
-
-# 日志与临时文件
-*.log
-ge_proto_*.txt
-kernel_meta/
 extra-info/
 fusion_result.json
-
-# 测试数据
-**/tests/case_data/
+ge_proto_*.txt
+host_native_tiling/
+kernel_meta/
+test/_ge_out/
+test/xllm_binding/
