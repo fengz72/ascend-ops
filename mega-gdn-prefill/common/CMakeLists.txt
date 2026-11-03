@@ -124,8 +124,7 @@ if (NOT BUILD_OPS_RTY_KERNEL)
             BUILD_ALWAYS TRUE
             BUILD_BYPRODUCTS
         )
-        add_subdirectory(src/framework)
-    else()
-        add_subdirectory(src/tiling_sink)
-    endif()
+else()
+    add_subdirectory(src/tiling_sink)
+endif()
 endif()

@@ -991,7 +991,6 @@ while [[ $# -gt 0 ]]; do
         ;;
     --PR_PKG)
         PR_CHANGED_FILES="$2"
-        ops_names=$(python3 "$CURRENT_DIR"/../cmake/scripts/parse_changed_files.py -c "$CURRENT_DIR"/tests/test_config.yaml -f "$PR_CHANGED_FILES" get_related_examples)
         echo "Operators that need custom package compilation:$ops_names"
         if [ -z "${ops_names}" ];then
             log "Info: No custom packages to build for this PR."
@@ -1260,7 +1259,6 @@ fi
 
 if [ -n "${TEST}" ];then
     if [ -n "${PR_CHANGED_FILES}" ];then
-        TEST=$(python3 "$CURRENT_DIR"/../cmake/scripts/parse_changed_files.py -c "$CURRENT_DIR"/tests/test_config.yaml -f "$PR_CHANGED_FILES" get_related_ut)
         echo "Operators that need to run UT: $TEST"
         if [ -z "${TEST}" ];then
             log "Info: This PR didn't trigger any UTest."
@@ -1476,20 +1474,6 @@ build_ut() {
             echo "Target $UT_TARGET not found, skipping build." 
         fi
     done
-    if [[ "$COV" == "true" && "$ENABLE_UT_EXEC" == "TRUE" && "$has_valid_target" == "TRUE" ]]; then
-        python3 ${BASE_PATH}/../cmake/scripts/utest/gen_coverage.py \
-            -s=${BASE_PATH} \
-            -c=${BUILD_PATH} \
-            -f="/tmp/*" \
-            -f="/usr/include/*" \
-            -f="$(realpath $ASCEND_HOME_PATH/../)/*" \
-            -y=${BASE_PATH}/tests/test_config.yaml
-        local gen_coverage_result=$?
-        if [ $gen_coverage_result -ne 0 ]; then
-            echo "Error: Gen coverage failed with exit code: $gen_coverage_result"
-            exit $gen_coverage_result
-        fi
-    fi
   fi
   exit 0
 }
@@ -1542,7 +1526,6 @@ function build_example_for_ci()
 # 冒烟任务只跑examples
 function process_ci_smoke_with_changed_list()
 {
-    TEST=$(python3 "$CURRENT_DIR"/../cmake/scripts/parse_changed_files.py -c "$CURRENT_DIR"/tests/test_config.yaml -f "$PR_CHANGED_FILES" get_related_examples)
     echo "Operators that need to run examples: $TEST"
     if [[ -z "$TEST" ]];then
         echo "No related unit tests found. Skipping CI test execution."

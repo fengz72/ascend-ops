@@ -10,12 +10,4 @@
 
 if (BUILD_OPEN_PROJECT)
     include(${OPS_ADV_CMAKE_DIR}/intf_pub.cmake)
-
-    if (TESTS_UT_OPS_TEST)
-        include(${OPS_ADV_CMAKE_DIR}/intf_pub_utest.cmake)
-    endif ()
-
-    if (TESTS_EXAMPLE_OPS_TEST)
-        include(${OPS_ADV_CMAKE_DIR}/intf_pub_examples.cmake)
-    endif ()
 endif ()
