@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mega-gdn-prefill-torch"
+version = "2.0.0"
+description = "PyTorch binding for the vendored MegaGdnPrefill operator (eager via the installed libcust_opapi.so, graph mode via torchair)"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools]
+py-modules = ["mega_gdn_prefill", "mega_gdn_prefill_binding"]

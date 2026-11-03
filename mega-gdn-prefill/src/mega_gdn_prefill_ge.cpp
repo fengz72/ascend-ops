@@ -10,9 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <dlfcn.h>
 #include <string>
 #include <vector>
 
@@ -22,8 +20,7 @@
 #include "exe_graph/runtime/infer_datatype_context.h"
 #include "exe_graph/runtime/infer_shape_context.h"
 
-#include "aclnn/acl_meta.h"
-#include "acl/acl_rt.h"
+#include "mega_gdn_prefill_common.h"
 
 namespace ge {
 REG_OP(MegaGdnPrefill)
@@ -49,44 +46,7 @@ REG_OP(MegaGdnPrefill)
     .OP_END_FACTORY_REG(MegaGdnPrefill)
 }  // namespace ge
 
-extern "C" aclnnStatus aclnnMegaGdnPrefillOpGetWorkspaceSize(
-    const aclTensor *mixedQkv, const aclTensor *b, const aclTensor *a, const aclTensor *z,
-    const aclTensor *convWeight, const aclTensor *convState, const aclTensor *aLog,
-    const aclTensor *dtBias, const aclTensor *convStateReadIndices,
-    const aclTensor *convStateWriteIndices, const aclTensor *ssmStateReadIndices,
-    const aclTensor *ssmStateWriteIndices, const aclTensor *ssmCache,
-    const aclTensor *maskLower, const aclTensor *maskFull, const aclTensor *minusIdentity,
-    const aclTensor *cuSeqlens, const aclTensor *normWeight, int64_t fftsAddr,
-    int64_t numMatrices, const aclTensor *normOutputOut, const aclTensor *convStateOutOut,
-    const aclTensor *ssmCacheOutOut, uint64_t *workspaceSize, aclOpExecutor **executor);
-
-extern "C" aclnnStatus aclnnMegaGdnPrefillOp(void *workspace, uint64_t workspaceSize,
-                                             aclOpExecutor *executor, aclrtStream stream);
-
 namespace {
-
-uint64_t ResolveFftsAddr() {
-  if (std::getenv("MEGA_GDN_PREFILL_FFTS_DISABLE") != nullptr) {
-    return 0;
-  }
-  using RtGetC2cCtrlAddr = int32_t (*)(uint64_t *, uint32_t *);
-  static RtGetC2cCtrlAddr getC2cCtrlAddr = []() -> RtGetC2cCtrlAddr {
-    void *runtime = dlopen("libruntime.so", RTLD_LAZY | RTLD_LOCAL);
-    if (runtime == nullptr) {
-      return nullptr;
-    }
-    return reinterpret_cast<RtGetC2cCtrlAddr>(dlsym(runtime, "rtGetC2cCtrlAddr"));
-  }();
-  if (getC2cCtrlAddr == nullptr) {
-    return 0;
-  }
-  uint64_t fftsAddr = 0;
-  uint32_t fftsLen = 0;
-  if (getC2cCtrlAddr(&fftsAddr, &fftsLen) != 0 || fftsLen == 0) {
-    return 0;
-  }
-  return fftsAddr;
-}
 
 aclDataType ToAclDataType(ge::DataType dataType) {
   switch (dataType) {

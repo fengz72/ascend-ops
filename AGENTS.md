@@ -16,8 +16,9 @@ GE custom-op-v2 包装）、`mtgr_attention/`、`prefix-attention/`。
   1. `lib.define(SCHEMA)`：schema 字符串 `<op_name>(Tensor x, ...) -> Tensor`；
   2. `lib.impl(<op_name>, <meta_impl>, "Meta")`：返回 `torch.empty_like(...)`
      之类的形状/类型推导，供 dynamo 导出与图编译；
-  3. `lib.impl(<op_name>, <eager_impl>, "PrivateUse1")`：NPU eager 实现，
-     绑定不可用时注册抛错占位（图模式导出只依赖 Meta）。
+  3. `lib.impl(<op_name>, <eager_impl>, "PrivateUse1")`：NPU eager 实现
+     （JIT 桥经 flat ABI 直调 `libcust_opapi.so`；绑定随交付必备，
+     缺失即安装/加载失败，fail-loud）。
 - 图模式经 torchair converter 接入：
   `torchair.register_fx_node_ge_converter(torch.ops.ascend_ops.<op_name>.default)(_convert)`，
   `_convert` 内用 `torchair.ge.custom_op("<GE op 名>", inputs={...}, outputs=[...])`
@@ -29,13 +30,16 @@ GE custom-op-v2 包装）、`mtgr_attention/`、`prefix-attention/`。
 
 ## 构建与测试
 
-- 构建（vendored 包，先 `source CANN set_env.sh`）：
+- 构建并安装（vendored 包，先 `source CANN set_env.sh`）：
   ```bash
-  bash mega-gdn-prefill/build.sh          # 默认 ascend910_93、三算子
-  SOC_VERSION=ascend910b bash mega-gdn-prefill/build.sh   # SoC 覆盖
-  OPS=mega_gdn_prefill_op bash mega-gdn-prefill/build.sh  # 算子覆盖
+  bash mega-gdn-prefill/install.sh   # 一条命令：构建+装入 $ASCEND_HOME_PATH/opp+pip 注册 torch 绑定
+  SOC_VERSION=ascend910b bash mega-gdn-prefill/install.sh    # SoC 覆盖
+  OPS=mega_gdn_prefill_op bash mega-gdn-prefill/install.sh  # 算子覆盖
+  # 开发机备选：pip install -e mega-gdn-prefill/python --no-deps（源码树 editable，
+  # 改 python/ 即时生效；与 vendor 安装二选一，后装者生效）
   ```
-- 测试（需 CANN 环境 + `mega_gdn_prefill` 可从 PYTHONPATH import）：
+- 测试（需 CANN 环境 + `bash mega-gdn-prefill/install.sh`（含绑定注册）；
+  activator 自发现 `.so` 并自挂 opp，无需手工导出）：
   ```bash
   python3 mega-gdn-prefill/test/test_mega_gdn_prefill.py [device]
   ```

@@ -3,8 +3,9 @@
 Usage:
     python3 test/test_mega_gdn_prefill.py [device]
 
-Requires the CANN environment with mega_gdn_prefill importable
-(PYTHONPATH includes the dependency install/python directory).
+Requires: CANN env sourced (set_env.sh) and `bash install.sh` (builds,
+installs the operator and registers the binding). The activator locates
+the .so and mounts the vendor package itself; no shell exports are needed.
 """
 import sys
 
@@ -84,7 +85,6 @@ def main():
     import torch_npu
     torch.npu.set_device(device)
     import mega_gdn_prefill  # noqa: F401
-    import custom_ops_lib
     from torch_npu.dynamo.torchair import CompilerConfig, get_npu_backend
     globals()["torch"] = torch
 
@@ -92,9 +92,17 @@ def main():
     dev_inputs = {n: case[n].to(dev).contiguous() for n in NAMES}
 
     golden = cpu_golden(case)
-    eager = custom_ops_lib.mega_gdn_prefill_op(
-        *[dev_inputs[n] for n in NAMES],
-        NV * ((64 + 127) // 128)).cpu()
+    # eager leg through the torch op (PrivateUse1 -> JIT bridge): z is
+    # overwritten in place and returned as an alias (schema Tensor(a!))
+    z_pristine = dev_inputs["z"].clone()
+    z_in = z_pristine.clone()
+    args = [z_in if n == "z" else dev_inputs[n] for n in NAMES]
+    eager_t = torch.ops.ascend_ops.mega_gdn_prefill(*args)
+    assert eager_t.data_ptr() == z_in.data_ptr(), \
+        "eager output must alias z (in-place contract)"
+    assert not torch.equal(z_in, z_pristine), \
+        "eager must overwrite z in place (Tensor(a!) contract)"
+    eager = eager_t.cpu()
 
     config = CompilerConfig()
     config.mode = "max-autotune"
@@ -106,7 +114,6 @@ def main():
     with torch.no_grad():
         graph = compiled(*[dev_inputs[n] for n in NAMES]).cpu()
 
-    r_eager = rel_l2(eager, golden)
     r_graph = rel_l2(graph, eager)
     c_eager = torch.dot(eager.float().flatten(), golden.float().flatten()) / \
         (eager.float().norm() * golden.float().norm()).item().__float__()

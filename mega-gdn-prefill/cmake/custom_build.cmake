@@ -129,6 +129,28 @@ if (BUILD_OPEN_PROJECT)
         target_link_libraries(cust_opapi PRIVATE graph ascendcl lowering)
     endif()
 
+    # MegaGdnPrefill eager flat entry (project addition): extern "C"
+    # mega_gdn_prefill_run_v2 in the same libcust_opapi.so, called by the JIT
+    # torch bridge; keeps this side free of torch headers.
+    if (EXISTS ${CMAKE_SOURCE_DIR}/mega_gdn_prefill_eager.cc)
+        target_sources(cust_opapi PRIVATE
+                ${CMAKE_SOURCE_DIR}/mega_gdn_prefill_eager.cc)
+    endif()
+
+    # MegaGdnPrefill torch binding (project addition): ship the python files
+    # with the vendor package so pip can register the binding from the CANN
+    # install — deploy machines never need the source tree. Rides op_api/
+    # because the .run installer copies op_api wholesale (it only upgrades
+    # known subdirs; a top-level python/ dir would be dropped).
+    if (NOT ENABLE_BUILT_IN AND EXISTS ${CMAKE_SOURCE_DIR}/../python/pyproject.toml)
+        install(FILES
+                ${CMAKE_SOURCE_DIR}/../python/pyproject.toml
+                ${CMAKE_SOURCE_DIR}/../python/mega_gdn_prefill.py
+                ${CMAKE_SOURCE_DIR}/../python/mega_gdn_prefill_binding.py
+                ${CMAKE_SOURCE_DIR}/../python/mega_gdn_prefill_bridge.cpp
+                DESTINATION packages/vendors/${VENDOR_NAME}/op_api/python)
+    endif()
+
     # op proto
     add_library(cust_proto SHARED)
     target_compile_options(cust_proto PRIVATE
