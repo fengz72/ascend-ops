@@ -4,8 +4,12 @@
 //
 // num_matrices is derived from cu_seqlens at Execute time (keeps B/S dynamic;
 // the upstream INT64 attribute would bake shapes into the graph).
-// Output z aliases input z (MakeOutputRefInput) to bypass the GE output-memory
-// reuse defect; z must not be consumed after this op in the graph.
+// Output norm_output is a separately allocated tensor (ctx->MallocOutputTensor,
+// upstream contract: z stays a pure input). An earlier design aliased the
+// output onto z's buffer (MakeOutputRefInput) to dodge the GE output-pool
+// small->large treading, but that defect is fixed by the fix_9.1.0 executor
+// package, and the nonstandard alias was the prime suspect for the ge_runtime
+// (default allocator) cross-execution corruption.
 
 #include <cmath>
 #include <cstdint>
@@ -42,7 +46,7 @@ REG_OP(MegaGdnPrefill)
     .INPUT(minus_identity, TensorType({DT_BF16}))
     .INPUT(cu_seqlens, TensorType({DT_INT32}))
     .INPUT(norm_weight, TensorType({DT_BF16}))
-    .OUTPUT(z, TensorType({DT_BF16}))
+    .OUTPUT(norm_output, TensorType({DT_BF16}))
     .OP_END_FACTORY_REG(MegaGdnPrefill)
 }  // namespace ge
 
@@ -190,9 +194,11 @@ class MegaGdnPrefill : public ge::EagerExecuteOp, public ge::ShapeInferOp {
     }
     const uint64_t fftsAddr = ResolveFftsAddr();
 
-    gert::Tensor *normOutput = ctx->MakeOutputRefInput(0, kIdxZ);
+    gert::Tensor *normOutput = ctx->MallocOutputTensor(
+        0, CopyStorageShape(inputs[kIdxZ]), inputs[kIdxZ]->GetFormat(),
+        inputs[kIdxZ]->GetDataType());
     if (normOutput == nullptr) {
-      std::fprintf(stderr, "MegaGdnPrefill: fail ref_z_output\n");
+      std::fprintf(stderr, "MegaGdnPrefill: fail malloc_norm_output\n");
       return ge::GRAPH_FAILED;
     }
     const size_t convStateBytes = TensorBytes(inputs[kIdxConvState]);

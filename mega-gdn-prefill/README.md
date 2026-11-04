@@ -37,7 +37,9 @@ import，零 shell 导出。多 vendor 环境需 `load_priority=mega_gdn_prefill
 python3 test/test_mega_gdn_prefill.py [device]    # 前置：bash install.sh（含绑定注册）
 ```
 
-门禁：graph vs eager `rel_l2 < 0.001`、eager vs CPU golden `cos > 0.95`，外加
+门禁：graph vs eager `rel_l2 < 0.001`、eager vs CPU golden `rel_l2 < 0.02`
+（golden 含 `q * DK**-0.5`，与 kernel 内部一次性 scale 一致），外加 B2/W256
+多行打包相位：6 次重复 eager 调用须逐位一致且对 golden `rel_l2 < 0.02`，以及
 z 契约断言（输出别名 z、原地覆盖）。eager 腿 torch.ops → JIT pybind 桥
 （torch extension cache，需 ninja）→ `.so` 内 flat 入口 `mega_gdn_prefill_run_v2`。
 
@@ -71,7 +73,10 @@ cmake/ common/ scripts/   构建机器与共享代码（有修改与裁剪，见
 4. **`.gitignore`** 追加 `.cache/`、`test/_ge_out/`。
 5. **项目自建接入件（非算子代码）**：`src/mega_gdn_prefill_common.h`（aclnn 声明
    与 FFTS 解析，GE/eager 共享）、`src/mega_gdn_prefill_eager.cc`（`extern "C"
-   mega_gdn_prefill_run_v2`，零 torch 头依赖）、`python/mega_gdn_prefill_binding.py`
+   mega_gdn_prefill_run_v2`，零 torch 头依赖；launch 后先
+   `aclrtSynchronizeStream` 再 `aclrtFree(workspace)`——非流序 free 会让分配器
+   回收在飞 kernel 经 FFTS+ 仍在访问的页，多行×多 chunk 几何下产生
+   MTE invalid GM address / 非确定输出）、`python/mega_gdn_prefill_binding.py`
    + `mega_gdn_prefill_bridge.cpp`（JIT eager 桥）、`python/pyproject.toml`（pip
    editable 元数据）；删除旧 `python/custom_ops_lib.py`（ctypes）与
    `python/torchair.py`（死 shim，torch_npu 注入顶层 torchair 别名）。
@@ -93,11 +98,13 @@ cmake/ common/ scripts/   构建机器与共享代码（有修改与裁剪，见
 机制（`REG_OP` + `EagerExecuteOp::Execute`）每次执行从 `cu_seqlens` 现算，B/S 保持
 符号化。关键决策：
 
-- **输出别名 z**（`MakeOutputRefInput`）：绕开 GE 执行器输出内存跨执行复用池
-  （小→大会踩踏）；z 在本算子之后不得再被消费。torch 侧 schema 为
-  `Tensor(a!) z ... -> Tensor`——mutation 注解使 dynamo 保持 z 读序在算子之后，
-  返回值不带别名注解（AOT functionalization 拒绝自定义算子输出别名注解）；
-  eager 桥同语义原地写 z 并返回之。
+- **独立输出 `norm_output`**（`ctx->MallocOutputTensor`，上游契约：z 纯输入，输出名
+  与 vendored op def 一致）：早期设计用输出别名 z（`MakeOutputRefInput`）绕开 GE 输出
+  池小→大踩踏；该缺陷已由 fix_9.1.0 executor 包修复（`MallocOutputTensor` 按逻辑
+  尺寸比较并在增大时重分配），别名同时是 ge_runtime（GE 默认分配器）跨执行非确定
+  输出的首要嫌疑，已移除。torch 侧 schema 保持 `Tensor(a!) z ... -> Tensor`——
+  mutation 注解仍服务 eager 桥的原地语义（eager 腿 torch 分配器管理 z 生命周期，
+  已验证位级稳定）；graph 腿消费者读到的值不变。
 - **scratch 走 `ctx->MallocWorkSpace`**（框架管理，不受上述复用缺陷影响）。
 - **A2/A3 FFTS 地址**经 `dlsym("libruntime.so", "rtGetC2cCtrlAddr")` 现取。
 

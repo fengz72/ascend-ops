@@ -160,6 +160,14 @@ extern "C" int mega_gdn_prefill_run_v2(void *const *addrs, const int64_t *dims,
                                      static_cast<aclrtStream>(stream));
     }
     if (workspace != nullptr) {
+      // aclrtFree is not stream-ordered: freeing while the launched kernel is
+      // still in flight lets the allocator recycle pages the FFTS+ pipeline
+      // keeps accessing (MTE invalid GM address / torn reads, nondeterministic
+      // outputs at multi-row multi-chunk shapes). Drain the stream first.
+      if (aclrtSynchronizeStream(static_cast<aclrtStream>(stream)) != ACL_SUCCESS
+          && status == 0) {
+        status = 7;
+      }
       aclrtFree(workspace);
     }
   }

@@ -7,10 +7,12 @@ torch.ops.ascend_ops.mega_gdn_prefill (Meta + PrivateUse1) and the torchair
 GE converter. With the binding pip-installed (pip install -e python) the
 operator imports from anywhere; no shell exports are needed.
 
-Contract: z is overwritten in place and returned as an alias. The schema
-declares the mutation (Tensor(a!) z) so dynamo keeps z-reads ordered after
-the op; the return stays a plain Tensor because AOT functionalization
-rejects alias annotations on custom-op outputs.
+Contract: the EAGER leg overwrites z in place and returns it as an alias
+(the schema mutation Tensor(a!) keeps dynamo's z-reads ordered after the op).
+The GE wrapper allocates a separate norm_output tensor instead (upstream
+contract, z stays a pure input in the graph); the value flowing to consumers
+is identical either way, so the return stays a plain Tensor (AOT
+functionalization rejects alias annotations on custom-op outputs).
 
 The torch.library.Library handle must stay module-level alive — a
 function-local would be GC'd, unregistering the schema and crashing dynamo.
@@ -128,7 +130,7 @@ def _register_torch_op():
         return torchair.ge.custom_op(
             "MegaGdnPrefill",
             inputs={name: value for name, value in zip(NAMES, values)},
-            outputs=["z"])
+            outputs=["norm_output"])
 
     torchair.register_fx_node_ge_converter(torch.ops.ascend_ops.mega_gdn_prefill.default)(_convert)
     _REGISTERED = True
