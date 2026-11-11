@@ -685,38 +685,6 @@ function check_stable_aclnn_abi(){
     # fla 的 Stable-ABI launcher 门禁在本包不适用（本包交付 GE 包装 + torch
     # 绑定，不随 torch_custom/fla_npu launcher），直接跳过。
     return 0
-    if [[ "${ENABLE_BUILD_PKG}" != "TRUE" || "${ENABLE_BUILT_CUSTOM}" != "TRUE" ]]; then
-        return 0
-    fi
-    case "${FLA_NPU_BUILD_STABLE_ABI:-TRUE}" in
-        0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|[Oo][Ff][Ff])
-            echo "[ERROR] FLA_NPU_BUILD_STABLE_ABI cannot disable the mandatory Stable-ABI launcher" >&2
-            return 1
-            ;;
-    esac
-
-    local opp_include
-    opp_include=$(find "${BUILD_DIR}" "${BUILD_OUT_DIR}" -type d \
-        -path '*/vendors/fla_npu_transformer/op_api/include/aclnnop' \
-        -print 2>/dev/null | sort | head -n 1)
-    if [[ -z "${opp_include}" ]]; then
-        log "[ERROR] Built OPP aclnn headers were not found for the Stable-ABI gate."
-        return 1
-    fi
-
-    local include_args=(--opp-include "${opp_include}")
-    local cann_include
-    while IFS= read -r cann_include; do
-        include_args+=("${cann_include}")
-    done < <(find "${ASCEND_HOME_PATH:-/nonexistent}" -maxdepth 3 -type d \
-        -path '*/include/aclnnop' -print 2>/dev/null | sort)
-    if [[ -n "${OPS_FILTER_VALUE}" ]]; then
-        include_args+=(--ops "${OPS_FILTER_VALUE}")
-    fi
-
-    log "[INFO] Checking built OPP aclnn headers against Stable-ABI adapters."
-    python3 "${CURRENT_DIR}/torch_custom/fla_npu/tools/op_abi_validate.py" \
-        "${include_args[@]}"
 }
 
 function build_package(){

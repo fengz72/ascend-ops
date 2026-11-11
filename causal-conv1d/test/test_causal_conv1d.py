@@ -87,7 +87,6 @@ def main():
                              dynamic=True)
 
     for name, shape, activation, with_bias, dtype in cases:
-        torch.manual_seed(42)
         x, weight = build_inputs(shape, dtype=dtype)
         bias = None
         if with_bias:

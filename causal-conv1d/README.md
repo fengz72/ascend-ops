@@ -5,8 +5,8 @@ vendored [flash-linear-attention-npu](https://github.com/flashserve/flash-linear
 图模式包装（`CausalConv1dGE`）。算子源码
 `fla/ops/ascendc/gdn/gdn_preprocess/causal_conv1d/` 与上游逐字节一致（main @
 `56a21dc`）；`cmake/`、`common/`、`scripts/`、`build.sh`、`CMakeLists.txt`
-为 fla-npu 构建机制快照（含本项目适配改动，见文末改动清单）。许可随上游
-（`LICENSE` / `LICENSES/`：算子 CANN OSL v2.0，机制文件 BSD-3-Clause）。
+为 fla-npu 构建机制快照（含本项目适配改动，见文末改动清单）。许可见包内
+`LICENSE`：算子源码 BSD-3-Clause，构建机制文件 CANN OSL v2.0。
 
 性能背景（startlux-decision-v1.1-0.8b-instant 模型 GDN conv 路径，A3）：
 fla CausalConv1d 单算子约 56 µs/层（NPU event，含 silu、dim-last 直连），
@@ -63,6 +63,14 @@ y = torch.ops.ascend_ops.causal_conv1d(x, weight, bias=None,
   时 fx 节点映射为 `torchair.ge.custom_op("CausalConv1dGE")`，GE 侧
   REG_OP `CausalConv1dGE`（EagerExecuteOp 直调 aclnnCausalConv1d，
   kernel 二进制/tiling 复用 vendored 算子）
+- OPP 挂载形态：`_mount_opp` 把 vendor 包目录（`<opp>/vendors/causal_conv1d`，
+  含 `op_api/`+`op_impl/`+`op_proto/`）prepend 进 `ASCEND_CUSTOM_OPP_PATH`。
+  官方 custom-op-v2 文档的 `op_graph/` 最小布局只装 GE 包装 .so、不携带
+  AscendC kernel/tiling；本包是 vendored 算子 + GE wrapper 混合交付，必须走
+  标准自定义算子 vendor 包布局，vendor 目录形态与 fla-npu wheel/torch_npu
+  生态约定一致（GE 注册经进程内 dlopen，不依赖 op_graph 目录扫描）。已验证
+  全局 opp `load_priority` 不含本包时，仅凭该挂载 eager+graph 均可解析
+  （graph 与 eager 逐位一致）
 - `torch.library.Library` 句柄模块级存活（局部变量会被 GC 注销 schema）；
   torch_npu 先于 torchair import（torchair 别名注入）
 
@@ -92,6 +100,8 @@ B3 0.9985）而 rel_l2 恒为 0.0017——同输入下与上游 fla-npu wheel �
 
 ```
 fla/ops/ascendc/gdn/gdn_preprocess/causal_conv1d/   vendored 算子（零修改）
+fla/ops/ascendc/common/   fla 通用 kernel_utils（构建机制经 config.cmake 随包
+                           安装，本算子不引用，勿删）
 src/                  项目自建：CausalConv1dGE GE 包装 + eager flat 入口
 python/               torch 绑定（activator + JIT binding + bridge）
 cmake/ common/ scripts/ build.sh CMakeLists.txt     fla-npu 构建机制快照

@@ -30,9 +30,14 @@ VENDORS_CFG="${ASCEND_OPP_PATH:-${ASCEND_HOME_PATH}/opp}/vendors/config.ini"
 if [ ! -f "${VENDORS_CFG}" ]; then
   echo "load_priority=causal_conv1d" > "${VENDORS_CFG}"
 elif grep -q "^load_priority=" "${VENDORS_CFG}"; then
-  if ! grep -q "^load_priority=causal_conv1d\(,\|$\)" "${VENDORS_CFG}"; then
-    sed -i 's/^load_priority=/load_priority=causal_conv1d,/' "${VENDORS_CFG}"
-    echo "prepended causal_conv1d to ${VENDORS_CFG} load_priority"
+  # 幂等置首：剔除列表中已有的 causal_conv1d 项再前插，避免重复条目
+  # （mega 包等后装者可能把本包挤到非首位）。
+  old="$(grep -m1 "^load_priority=" "${VENDORS_CFG}" | cut -d= -f2-)"
+  rest="$(printf '%s' "${old}" | awk -v FS=, '{out=""; for (i = 1; i <= NF; i++) if ($i != "" && $i != "causal_conv1d") out = (out == "" ? $i : out "," $i); print out}')"
+  new="causal_conv1d${rest:+,${rest}}"
+  if [ "${old}" != "${new}" ]; then
+    sed -i -E "s/^load_priority=.*/load_priority=${new}/" "${VENDORS_CFG}"
+    echo "set ${VENDORS_CFG} load_priority=${new}"
   fi
 else
   echo "load_priority=causal_conv1d" >> "${VENDORS_CFG}"

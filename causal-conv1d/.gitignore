@@ -6,6 +6,7 @@
 /build_out/
 /output/
 /third_party/
+/kernel_meta/
 /.cache/
 /dist/
 *.so

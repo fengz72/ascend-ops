@@ -6,27 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 
-#include "aclnn/acl_meta.h"
-#include "acl/acl_rt.h"
-
-// Generated aclnn declarations (autogen header rides the vendor package
-// include dir; declared here to keep the wrapper self-contained).
-extern "C" aclnnStatus aclnnCausalConv1dGetWorkspaceSize(
-    const aclTensor *x, const aclTensor *weight, const aclTensor *biasOptional,
-    const aclTensor *convStatesOptional, const aclTensor *queryStartLocOptional,
-    const aclTensor *cacheIndicesOptional, const aclTensor *hasInitialStateOptional,
-    const aclTensor *numAcceptedTokensOptional,
-    const aclIntArray *queryStartLocCpuOptional,
-    const aclIntArray *cacheIndicesCpuOptional,
-    const aclIntArray *hasInitialStateCpuOptional,
-    const aclIntArray *numAcceptedTokensCpuOptional,
-    char *activationOptional, int64_t padSlotId, int64_t nullBlockId,
-    int64_t runMode, int64_t headNum, int64_t maxQueryLen, const aclTensor *out,
-    uint64_t *workspaceSize, aclOpExecutor **executor);
-
-extern "C" aclnnStatus aclnnCausalConv1d(void *workspace, uint64_t workspaceSize,
-                                         aclOpExecutor *executor,
-                                         aclrtStream stream);
+#include "causal_conv1d_aclnn.h"
 
 namespace {
 
@@ -64,12 +44,15 @@ extern "C" int causal_conv1d_run(void *const *addrs, const int64_t *dims,
       ? MakeAclTensor(dims + 8, strides + 8, dtypes[2], dimNums[2], addrs[2])
       : nullptr;
   aclTensor *out = MakeAclTensor(outDims, outStrides, outDtype, outDimNum,
-                                 outAddr);
-  if (x == nullptr || weight == nullptr || out == nullptr) {
-    aclDestroyTensor(x);
-    aclDestroyTensor(weight);
-    aclDestroyTensor(bias);
-    aclDestroyTensor(out);
+                                  outAddr);
+  // A present bias whose wrap failed must not be treated as "absent":
+  // it would be silently dropped from the computation.
+  if (x == nullptr || weight == nullptr || out == nullptr ||
+      (addrs[2] != nullptr && bias == nullptr)) {
+    if (x != nullptr) aclDestroyTensor(x);
+    if (weight != nullptr) aclDestroyTensor(weight);
+    if (bias != nullptr) aclDestroyTensor(bias);
+    if (out != nullptr) aclDestroyTensor(out);
     return 3;
   }
 

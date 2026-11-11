@@ -13,32 +13,12 @@
 #include <cstring>
 #include <vector>
 
-#include "aclnn/acl_meta.h"
-#include "acl/acl_rt.h"
+#include "causal_conv1d_aclnn.h"
 #include "graph/custom_op.h"
 #include "graph/operator_reg.h"
 #include "exe_graph/runtime/eager_op_execution_context.h"
 #include "exe_graph/runtime/infer_datatype_context.h"
 #include "exe_graph/runtime/infer_shape_context.h"
-
-// Generated aclnn declarations (autogen header rides the vendor package
-// include dir; declared here to keep the wrapper self-contained).
-extern "C" aclnnStatus aclnnCausalConv1dGetWorkspaceSize(
-    const aclTensor *x, const aclTensor *weight, const aclTensor *biasOptional,
-    const aclTensor *convStatesOptional, const aclTensor *queryStartLocOptional,
-    const aclTensor *cacheIndicesOptional, const aclTensor *hasInitialStateOptional,
-    const aclTensor *numAcceptedTokensOptional,
-    const aclIntArray *queryStartLocCpuOptional,
-    const aclIntArray *cacheIndicesCpuOptional,
-    const aclIntArray *hasInitialStateCpuOptional,
-    const aclIntArray *numAcceptedTokensCpuOptional,
-    char *activationOptional, int64_t padSlotId, int64_t nullBlockId,
-    int64_t runMode, int64_t headNum, int64_t maxQueryLen, const aclTensor *out,
-    uint64_t *workspaceSize, aclOpExecutor **executor);
-
-extern "C" aclnnStatus aclnnCausalConv1d(void *workspace, uint64_t workspaceSize,
-                                         aclOpExecutor *executor,
-                                         aclrtStream stream);
 
 namespace ge {
 REG_OP(CausalConv1dGE)
@@ -65,6 +45,9 @@ aclDataType ToAclDataType(ge::DataType dataType) {
 }
 
 aclTensor *MakeAclTensor(const gert::Tensor *tensor) {
+  // Strides/offset assume a contiguous layout: the vendored aclnn def marks
+  // x/weight/bias AutoContiguous and the dense-FN-prefill contract only feeds
+  // dim-last contiguous tensors; gert::Tensor exposes no strides to check.
   const auto &shape = tensor->GetOriginShape();
   const size_t dimNum = shape.GetDimNum();
   std::vector<int64_t> dims(dimNum);
@@ -110,16 +93,31 @@ class CausalConv1dGE : public ge::EagerExecuteOp, public ge::ShapeInferOp {
     aclTensor *aclInputs[kNumInputs] = {
         MakeAclTensor(inputs[0]), MakeAclTensor(inputs[1]),
         inputs[kIdxBias] != nullptr ? MakeAclTensor(inputs[kIdxBias]) : nullptr};
-    for (int i = 0; i < kNumInputs; ++i) {
-      if (i != kIdxBias && aclInputs[i] == nullptr) {
-        for (int j = 0; j < i; ++j) {
+    aclTensor *aclOutput = MakeAclTensor(output);
+    auto destroyWrapped = [&aclInputs, &aclOutput] {
+      for (int j = 0; j < kNumInputs; ++j) {
+        if (aclInputs[j] != nullptr) {
           aclDestroyTensor(aclInputs[j]);
         }
+      }
+      if (aclOutput != nullptr) {
+        aclDestroyTensor(aclOutput);
+      }
+    };
+    for (int i = 0; i < kNumInputs; ++i) {
+      // A present input whose wrap failed must not be treated as "absent":
+      // a dropped bias would silently change results.
+      if (aclInputs[i] == nullptr && inputs[i] != nullptr) {
+        destroyWrapped();
         std::fprintf(stderr, "CausalConv1dGE: fail make_acl %d\n", i);
         return ge::GRAPH_FAILED;
       }
     }
-    aclTensor *aclOutput = MakeAclTensor(output);
+    if (aclOutput == nullptr) {
+      destroyWrapped();
+      std::fprintf(stderr, "CausalConv1dGE: fail make_acl out\n");
+      return ge::GRAPH_FAILED;
+    }
     uint64_t workspaceSize = 0;
     aclOpExecutor *executor = nullptr;
     aclnnStatus status = aclnnCausalConv1dGetWorkspaceSize(
