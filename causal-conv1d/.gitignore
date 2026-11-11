@@ -1,0 +1,17 @@
+.idea
+.vs
+.vscode
+*.swp
+/build/
+/build_out/
+/output/
+/third_party/
+/.cache/
+/dist/
+*.so
+*.a
+*.pyc
+__pycache__
+/test/result/
+PROF_*
+OPPROF_*

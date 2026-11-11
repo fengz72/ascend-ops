@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "causal-conv1d-torch"
+version = "1.0.0"
+description = "PyTorch binding for the vendored CausalConv1d operator (eager via the installed libcust_opapi.so, graph mode via torchair)"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools]
+py-modules = ["causal_conv1d", "causal_conv1d_binding"]
