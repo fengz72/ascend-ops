@@ -1,0 +1,1044 @@
+{
+  "device": "npu:3",
+  "dtype": "torch.bfloat16",
+  "iters": 200,
+  "warmup": 32,
+  "soc": "Ascend910_9382",
+  "cann": "/usr/local/Ascend/cann-9.1.0",
+  "arms": {
+    "fused_eager": "CausalConv1dQkv eager, bf16 out, NPU-resident metadata (state write-back included)",
+    "fused_eager_fp16": "CausalConv1dQkv eager, fp16 out, NPU-resident metadata",
+    "fused_eager_hostmeta": "CausalConv1dQkv eager, bf16 out, HOST-resident metadata (the eager contract's cheap route: no per-call D2H + stream sync)",
+    "conv_only_eager": "causal_conv1d(x, w, None, 'silu') alone (eager)",
+    "chain_current_eager": "current model sub-chain eager: conv + 3 slices + reshape + 2 rms_norm + flatten",
+    "chain_fused_eager": "replacement sub-chain eager (NPU metadata): fused op + the same 3 slices/reshape/flatten (no rms_norm)",
+    "chain_fused_eager_hostmeta": "replacement sub-chain eager with HOST metadata",
+    "fused_graph": "CausalConv1dQkv inside torch.compile(dynamic=True), bf16 out",
+    "chain_current_graph": "current sub-chain in torch.compile(dynamic=True)",
+    "chain_fused_graph": "replacement sub-chain in torch.compile(dynamic=True)"
+  },
+  "geometry": {
+    "conv_dim": 6144,
+    "q_dim": 2048,
+    "k_dim": 2048,
+    "v_dim": 2048,
+    "head_dim": 128,
+    "width": 4,
+    "no_bias": true,
+    "gdn_layers": 18,
+    "initial_state_mode": "zeros (model has no conv history)"
+  },
+  "state_side_effect": "conv_states is written back in place by every fused arm, so the state write is inside the timed region (initial_state_mode=0 makes the values irrelevant to the output)",
+  "notes": {
+    "metadata_residence": "eager arms mirror the graph arms with NPU-resident metadata (query_start_loc / cache_indices / initial_state_mode), which makes the eager entry do a stream-ordered D2H + aclrtSynchronizeStream per call; the *_hostmeta arms keep the same values on the host, the contract's cheap eager route, and exist only to price that D2H.",
+    "graph_launch_floor": "graph_launch_floor is a trivial 1-node compiled graph (a + 1.0) measured with the same harness; it bounds how much of a graph-mode number is per-call graph launch on this host, not operator work."
+  },
+  "correctness": {
+    "case": "official-ticket-urgent-r0",
+    "B": 1,
+    "S": 85,
+    "T": 85,
+    "golden": "conv_reference + packed_reference (CPU fp32)",
+    "eager": {
+      "cosine": 0.9999058246612549,
+      "relL2": 3.5365610528970137e-06
+    },
+    "graph": {
+      "cosine": 0.9999058246612549,
+      "relL2": 3.5365610528970137e-06
+    },
+    "graph_vs_eager_relL2": 0.0,
+    "graph_new_frames": 1,
+    "dtype_ok": true,
+    "conv_states_exact_eager": true,
+    "conv_states_exact_graph": true,
+    "gate": "PASS"
+  },
+  "perf": [
+    {
+      "case": "official-ticket-team-r0",
+      "B": 1,
+      "S": 99,
+      "T": 99,
+      "graph_trace": {
+        "fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_current_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "graph_launch_floor": {
+          "new_frames": 1,
+          "traced": true
+        }
+      },
+      "fused_eager": {
+        "kernel_ms_mean": 0.1519411001726985,
+        "kernel_ms_min": 0.11400000005960464,
+        "kernel_ms_p50": 0.14541999995708466,
+        "kernel_ms_p99": 0.22657999396324158,
+        "wall_ms_mean": 0.17886628455016762,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_fp16": {
+        "kernel_ms_mean": 0.1432720001414418,
+        "kernel_ms_min": 0.11993999779224396,
+        "kernel_ms_p50": 0.14322000741958618,
+        "kernel_ms_p99": 0.17402000725269318,
+        "wall_ms_mean": 0.1655051700072363,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.07584059998393058,
+        "kernel_ms_min": 0.0545400008559227,
+        "kernel_ms_p50": 0.07515999674797058,
+        "kernel_ms_p99": 0.10158000141382217,
+        "wall_ms_mean": 0.09920444979798049,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_graph": {
+        "kernel_ms_mean": 0.36894519984722135,
+        "kernel_ms_min": 0.2970399856567383,
+        "kernel_ms_p50": 0.3689599931240082,
+        "kernel_ms_p99": 0.41440001130104065,
+        "wall_ms_mean": 0.3895566950086504,
+        "iters": 200,
+        "warmup": 32
+      },
+      "conv_only_eager": {
+        "kernel_ms_mean": 0.08353299986571074,
+        "kernel_ms_min": 0.06319999694824219,
+        "kernel_ms_p50": 0.08107999712228775,
+        "kernel_ms_p99": 0.14282000064849854,
+        "wall_ms_mean": 0.10970223986078054,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_eager": {
+        "kernel_ms_mean": 0.3151841999590397,
+        "kernel_ms_min": 0.28356000781059265,
+        "kernel_ms_p50": 0.3099600076675415,
+        "kernel_ms_p99": 0.41764000058174133,
+        "wall_ms_mean": 0.3462556196609512,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager": {
+        "kernel_ms_mean": 0.26566359989345073,
+        "kernel_ms_min": 0.2364400029182434,
+        "kernel_ms_p50": 0.26447999477386475,
+        "kernel_ms_p99": 0.30469998717308044,
+        "wall_ms_mean": 0.2750860102241859,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.1694386000186205,
+        "kernel_ms_min": 0.1454399973154068,
+        "kernel_ms_p50": 0.1686599999666214,
+        "kernel_ms_p99": 0.19011999666690826,
+        "wall_ms_mean": 0.18408673000521958,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_graph": {
+        "kernel_ms_mean": 0.4655045002698898,
+        "kernel_ms_min": 0.3579599857330322,
+        "kernel_ms_p50": 0.4669399857521057,
+        "kernel_ms_p99": 0.5004600286483765,
+        "wall_ms_mean": 0.48699073027819395,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_graph": {
+        "kernel_ms_mean": 0.4517282998561859,
+        "kernel_ms_min": 0.37116000056266785,
+        "kernel_ms_p50": 0.4397599995136261,
+        "kernel_ms_p99": 0.8521000146865845,
+        "wall_ms_mean": 0.47421326977200806,
+        "iters": 200,
+        "warmup": 32
+      },
+      "graph_launch_floor": {
+        "kernel_ms_mean": 0.2424249005317688,
+        "kernel_ms_min": 0.16060000658035278,
+        "kernel_ms_p50": 0.22803999483585358,
+        "kernel_ms_p99": 0.31327998638153076,
+        "wall_ms_mean": 0.26589757995679975,
+        "iters": 200,
+        "warmup": 32
+      }
+    },
+    {
+      "case": "official-ticket-severity-r0",
+      "B": 1,
+      "S": 99,
+      "T": 99,
+      "graph_trace": {
+        "fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_current_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "graph_launch_floor": {
+          "new_frames": 1,
+          "traced": true
+        }
+      },
+      "fused_eager": {
+        "kernel_ms_mean": 0.15665790006518365,
+        "kernel_ms_min": 0.13556000590324402,
+        "kernel_ms_p50": 0.15559999644756317,
+        "kernel_ms_p99": 0.19468000531196594,
+        "wall_ms_mean": 0.18048275029286742,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_fp16": {
+        "kernel_ms_mean": 0.16590269953012465,
+        "kernel_ms_min": 0.13726000487804413,
+        "kernel_ms_p50": 0.1630599945783615,
+        "kernel_ms_p99": 0.21167999505996704,
+        "wall_ms_mean": 0.1859159499872476,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.08525760022923351,
+        "kernel_ms_min": 0.05663999915122986,
+        "kernel_ms_p50": 0.08138000220060349,
+        "kernel_ms_p99": 0.1509000062942505,
+        "wall_ms_mean": 0.1086344348732382,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_graph": {
+        "kernel_ms_mean": 0.39035989850759506,
+        "kernel_ms_min": 0.3618600070476532,
+        "kernel_ms_p50": 0.38637998700141907,
+        "kernel_ms_p99": 0.4386799931526184,
+        "wall_ms_mean": 0.4099757201038301,
+        "iters": 200,
+        "warmup": 32
+      },
+      "conv_only_eager": {
+        "kernel_ms_mean": 0.07181779991835356,
+        "kernel_ms_min": 0.05260000005364418,
+        "kernel_ms_p50": 0.07062000036239624,
+        "kernel_ms_p99": 0.09898000210523605,
+        "wall_ms_mean": 0.09371470543555915,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_eager": {
+        "kernel_ms_mean": 0.30698100075125695,
+        "kernel_ms_min": 0.2620199918746948,
+        "kernel_ms_p50": 0.2898600101470947,
+        "kernel_ms_p99": 0.39142000675201416,
+        "wall_ms_mean": 0.3285454696742818,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager": {
+        "kernel_ms_mean": 0.27717969954013827,
+        "kernel_ms_min": 0.25181999802589417,
+        "kernel_ms_p50": 0.27549999952316284,
+        "kernel_ms_p99": 0.3122600018978119,
+        "wall_ms_mean": 0.2951866848161444,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.20343590006232262,
+        "kernel_ms_min": 0.18347999453544617,
+        "kernel_ms_p50": 0.20241999626159668,
+        "kernel_ms_p99": 0.23107999563217163,
+        "wall_ms_mean": 0.22118495020549744,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_graph": {
+        "kernel_ms_mean": 0.4596585987508297,
+        "kernel_ms_min": 0.3596999943256378,
+        "kernel_ms_p50": 0.4574599862098694,
+        "kernel_ms_p99": 0.500819981098175,
+        "wall_ms_mean": 0.4779141000472009,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_graph": {
+        "kernel_ms_mean": 0.4519582006335259,
+        "kernel_ms_min": 0.3789199888706207,
+        "kernel_ms_p50": 0.44822001457214355,
+        "kernel_ms_p99": 0.5294399857521057,
+        "wall_ms_mean": 0.469701184774749,
+        "iters": 200,
+        "warmup": 32
+      },
+      "graph_launch_floor": {
+        "kernel_ms_mean": 0.22049829937517643,
+        "kernel_ms_min": 0.17423999309539795,
+        "kernel_ms_p50": 0.22010000050067902,
+        "kernel_ms_p99": 0.24848000705242157,
+        "wall_ms_mean": 0.24206932983361185,
+        "iters": 200,
+        "warmup": 32
+      }
+    },
+    {
+      "case": "official-ticket-urgent-r0",
+      "B": 1,
+      "S": 85,
+      "T": 85,
+      "graph_trace": {
+        "fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_current_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "graph_launch_floor": {
+          "new_frames": 1,
+          "traced": true
+        }
+      },
+      "fused_eager": {
+        "kernel_ms_mean": 0.14803309958428146,
+        "kernel_ms_min": 0.11231999844312668,
+        "kernel_ms_p50": 0.14499999582767487,
+        "kernel_ms_p99": 0.1922599971294403,
+        "wall_ms_mean": 0.1712127198697999,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_fp16": {
+        "kernel_ms_mean": 0.14973320003598928,
+        "kernel_ms_min": 0.12306000292301178,
+        "kernel_ms_p50": 0.1480800062417984,
+        "kernel_ms_p99": 0.19689999520778656,
+        "wall_ms_mean": 0.17336958495434374,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.08112070003524423,
+        "kernel_ms_min": 0.06077999994158745,
+        "kernel_ms_p50": 0.08083999902009964,
+        "kernel_ms_p99": 0.10382000356912613,
+        "wall_ms_mean": 0.10578380490187556,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_graph": {
+        "kernel_ms_mean": 0.3781525005400181,
+        "kernel_ms_min": 0.3296400010585785,
+        "kernel_ms_p50": 0.3775799870491028,
+        "kernel_ms_p99": 0.4156999886035919,
+        "wall_ms_mean": 0.39918592490721494,
+        "iters": 200,
+        "warmup": 32
+      },
+      "conv_only_eager": {
+        "kernel_ms_mean": 0.0695120002143085,
+        "kernel_ms_min": 0.05164000019431114,
+        "kernel_ms_p50": 0.06932000070810318,
+        "kernel_ms_p99": 0.0946199968457222,
+        "wall_ms_mean": 0.09490746539086103,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_eager": {
+        "kernel_ms_mean": 0.28674029916524885,
+        "kernel_ms_min": 0.2565000057220459,
+        "kernel_ms_p50": 0.28619998693466187,
+        "kernel_ms_p99": 0.32010000944137573,
+        "wall_ms_mean": 0.30747078475542367,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager": {
+        "kernel_ms_mean": 0.2426163000613451,
+        "kernel_ms_min": 0.2105800062417984,
+        "kernel_ms_p50": 0.24101999402046204,
+        "kernel_ms_p99": 0.28374001383781433,
+        "wall_ms_mean": 0.25846227013971657,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.17483380004763605,
+        "kernel_ms_min": 0.15199999511241913,
+        "kernel_ms_p50": 0.17387999594211578,
+        "kernel_ms_p99": 0.2222999930381775,
+        "wall_ms_mean": 0.19477456982713193,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_graph": {
+        "kernel_ms_mean": 0.45456289902329444,
+        "kernel_ms_min": 0.4261400103569031,
+        "kernel_ms_p50": 0.4524399936199188,
+        "kernel_ms_p99": 0.4821000099182129,
+        "wall_ms_mean": 0.4732482152758166,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_graph": {
+        "kernel_ms_mean": 0.45093650043010713,
+        "kernel_ms_min": 0.3590199947357178,
+        "kernel_ms_p50": 0.4396199882030487,
+        "kernel_ms_p99": 0.4997999966144562,
+        "wall_ms_mean": 0.47208864998538047,
+        "iters": 200,
+        "warmup": 32
+      },
+      "graph_launch_floor": {
+        "kernel_ms_mean": 0.22953590027987958,
+        "kernel_ms_min": 0.17608000338077545,
+        "kernel_ms_p50": 0.227960005402565,
+        "kernel_ms_p99": 0.2794399857521057,
+        "wall_ms_mean": 0.24965259479358792,
+        "iters": 200,
+        "warmup": 32
+      }
+    },
+    {
+      "case": "official-ticket-b3-r0",
+      "B": 3,
+      "S": 99,
+      "T": 297,
+      "graph_trace": {
+        "fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_current_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "graph_launch_floor": {
+          "new_frames": 1,
+          "traced": true
+        }
+      },
+      "fused_eager": {
+        "kernel_ms_mean": 0.1506812998652458,
+        "kernel_ms_min": 0.12554000318050385,
+        "kernel_ms_p50": 0.14920000731945038,
+        "kernel_ms_p99": 0.19862000644207,
+        "wall_ms_mean": 0.17396119015756994,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_fp16": {
+        "kernel_ms_mean": 0.15808270022273063,
+        "kernel_ms_min": 0.13023999333381653,
+        "kernel_ms_p50": 0.1502400040626526,
+        "kernel_ms_p99": 0.23214000463485718,
+        "wall_ms_mean": 0.18182236002758145,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.08625299979001283,
+        "kernel_ms_min": 0.06351999938488007,
+        "kernel_ms_p50": 0.08523999899625778,
+        "kernel_ms_p99": 0.11975999921560287,
+        "wall_ms_mean": 0.10754367453046143,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_graph": {
+        "kernel_ms_mean": 0.38933549985289573,
+        "kernel_ms_min": 0.2883000075817108,
+        "kernel_ms_p50": 0.38916000723838806,
+        "kernel_ms_p99": 0.417059987783432,
+        "wall_ms_mean": 0.4138758504996076,
+        "iters": 200,
+        "warmup": 32
+      },
+      "conv_only_eager": {
+        "kernel_ms_mean": 0.07252049984410405,
+        "kernel_ms_min": 0.05107999965548515,
+        "kernel_ms_p50": 0.07169999927282333,
+        "kernel_ms_p99": 0.09055999666452408,
+        "wall_ms_mean": 0.09616507508326322,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_eager": {
+        "kernel_ms_mean": 0.2808705998957157,
+        "kernel_ms_min": 0.2553200125694275,
+        "kernel_ms_p50": 0.27987998723983765,
+        "kernel_ms_p99": 0.3171199858188629,
+        "wall_ms_mean": 0.3040017047896981,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager": {
+        "kernel_ms_mean": 0.2475446993857622,
+        "kernel_ms_min": 0.19881999492645264,
+        "kernel_ms_p50": 0.243599995970726,
+        "kernel_ms_p99": 0.2923400104045868,
+        "wall_ms_mean": 0.2655424299882725,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.1621138998121023,
+        "kernel_ms_min": 0.14419999718666077,
+        "kernel_ms_p50": 0.16132000088691711,
+        "kernel_ms_p99": 0.1860000044107437,
+        "wall_ms_mean": 0.18219106539618224,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_graph": {
+        "kernel_ms_mean": 0.45962459951639173,
+        "kernel_ms_min": 0.3857400119304657,
+        "kernel_ms_p50": 0.459879994392395,
+        "kernel_ms_p99": 0.49619999527931213,
+        "wall_ms_mean": 0.4806584253674373,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_graph": {
+        "kernel_ms_mean": 0.4351060001552105,
+        "kernel_ms_min": 0.40101999044418335,
+        "kernel_ms_p50": 0.4304400086402893,
+        "kernel_ms_p99": 0.5209000110626221,
+        "wall_ms_mean": 0.45517685532104224,
+        "iters": 200,
+        "warmup": 32
+      },
+      "graph_launch_floor": {
+        "kernel_ms_mean": 0.21275670014321804,
+        "kernel_ms_min": 0.12897999584674835,
+        "kernel_ms_p50": 0.21233999729156494,
+        "kernel_ms_p99": 0.2600399851799011,
+        "wall_ms_mean": 0.2333490049932152,
+        "iters": 200,
+        "warmup": 32
+      }
+    },
+    {
+      "case": "official-image-damaged-r0",
+      "B": 1,
+      "S": 130,
+      "T": 130,
+      "graph_trace": {
+        "fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_current_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "graph_launch_floor": {
+          "new_frames": 1,
+          "traced": true
+        }
+      },
+      "fused_eager": {
+        "kernel_ms_mean": 0.13328670047223568,
+        "kernel_ms_min": 0.11085999757051468,
+        "kernel_ms_p50": 0.13313999772071838,
+        "kernel_ms_p99": 0.15624000132083893,
+        "wall_ms_mean": 0.15477742534130812,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_fp16": {
+        "kernel_ms_mean": 0.1403591001406312,
+        "kernel_ms_min": 0.11727999895811081,
+        "kernel_ms_p50": 0.13886000216007233,
+        "kernel_ms_p99": 0.17564000189304352,
+        "wall_ms_mean": 0.16222914506215602,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.07654619984328746,
+        "kernel_ms_min": 0.05389999970793724,
+        "kernel_ms_p50": 0.07614000141620636,
+        "kernel_ms_p99": 0.10763999819755554,
+        "wall_ms_mean": 0.0993934494908899,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_graph": {
+        "kernel_ms_mean": 0.38084180012345314,
+        "kernel_ms_min": 0.3191399872303009,
+        "kernel_ms_p50": 0.3836199939250946,
+        "kernel_ms_p99": 0.44165998697280884,
+        "wall_ms_mean": 0.40042548498604447,
+        "iters": 200,
+        "warmup": 32
+      },
+      "conv_only_eager": {
+        "kernel_ms_mean": 0.07082469992339611,
+        "kernel_ms_min": 0.04500000178813934,
+        "kernel_ms_p50": 0.07038000226020813,
+        "kernel_ms_p99": 0.09391999989748001,
+        "wall_ms_mean": 0.09470521472394466,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_eager": {
+        "kernel_ms_mean": 0.2846208000183105,
+        "kernel_ms_min": 0.25317999720573425,
+        "kernel_ms_p50": 0.2818000018596649,
+        "kernel_ms_p99": 0.31547999382019043,
+        "wall_ms_mean": 0.3066374355694279,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager": {
+        "kernel_ms_mean": 0.2247435000538826,
+        "kernel_ms_min": 0.20160000026226044,
+        "kernel_ms_p50": 0.22273999452590942,
+        "kernel_ms_p99": 0.2528400123119354,
+        "wall_ms_mean": 0.2451643050881103,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.16391370005905628,
+        "kernel_ms_min": 0.15182000398635864,
+        "kernel_ms_p50": 0.1637199968099594,
+        "kernel_ms_p99": 0.18452000617980957,
+        "wall_ms_mean": 0.18350982514675707,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_graph": {
+        "kernel_ms_mean": 0.4774449998140335,
+        "kernel_ms_min": 0.4029200077056885,
+        "kernel_ms_p50": 0.4728200137615204,
+        "kernel_ms_p99": 0.5507000088691711,
+        "wall_ms_mean": 0.4961957549676299,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_graph": {
+        "kernel_ms_mean": 0.44030839994549753,
+        "kernel_ms_min": 0.3998199999332428,
+        "kernel_ms_p50": 0.4311999976634979,
+        "kernel_ms_p99": 0.5914599895477295,
+        "wall_ms_mean": 0.4619627649663016,
+        "iters": 200,
+        "warmup": 32
+      },
+      "graph_launch_floor": {
+        "kernel_ms_mean": 0.2196827994287014,
+        "kernel_ms_min": 0.15476000308990479,
+        "kernel_ms_p50": 0.21916000545024872,
+        "kernel_ms_p99": 0.24899999797344208,
+        "wall_ms_mean": 0.239513004780747,
+        "iters": 200,
+        "warmup": 32
+      }
+    },
+    {
+      "case": "long-seq-1001",
+      "B": 1,
+      "S": 1001,
+      "T": 1001,
+      "graph_trace": {
+        "fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_current_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "chain_fused_graph": {
+          "new_frames": 1,
+          "traced": true
+        },
+        "graph_launch_floor": {
+          "new_frames": 1,
+          "traced": true
+        }
+      },
+      "fused_eager": {
+        "kernel_ms_mean": 0.1661024996638298,
+        "kernel_ms_min": 0.1453399956226349,
+        "kernel_ms_p50": 0.1661600023508072,
+        "kernel_ms_p99": 0.19302000105381012,
+        "wall_ms_mean": 0.16760303522460163,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_fp16": {
+        "kernel_ms_mean": 0.16800590023398398,
+        "kernel_ms_min": 0.1466600000858307,
+        "kernel_ms_p50": 0.16735999286174774,
+        "kernel_ms_p99": 0.19767999649047852,
+        "wall_ms_mean": 0.1695070049026981,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.09841910004615784,
+        "kernel_ms_min": 0.07992000132799149,
+        "kernel_ms_p50": 0.09837999939918518,
+        "kernel_ms_p99": 0.11677999794483185,
+        "wall_ms_mean": 0.10311973514035344,
+        "iters": 200,
+        "warmup": 32
+      },
+      "fused_graph": {
+        "kernel_ms_mean": 0.37620519965887067,
+        "kernel_ms_min": 0.29976001381874084,
+        "kernel_ms_p50": 0.37376001477241516,
+        "kernel_ms_p99": 0.41962000727653503,
+        "wall_ms_mean": 0.3973346599377692,
+        "iters": 200,
+        "warmup": 32
+      },
+      "conv_only_eager": {
+        "kernel_ms_mean": 0.09001749999821186,
+        "kernel_ms_min": 0.06356000155210495,
+        "kernel_ms_p50": 0.08959999680519104,
+        "kernel_ms_p99": 0.11289999634027481,
+        "wall_ms_mean": 0.09415810520295054,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_eager": {
+        "kernel_ms_mean": 0.27625280141830444,
+        "kernel_ms_min": 0.24230000376701355,
+        "kernel_ms_p50": 0.2755799889564514,
+        "kernel_ms_p99": 0.31022000312805176,
+        "wall_ms_mean": 0.29801620985381305,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager": {
+        "kernel_ms_mean": 0.23309540048241614,
+        "kernel_ms_min": 0.20277999341487885,
+        "kernel_ms_p50": 0.23204000294208527,
+        "kernel_ms_p99": 0.2803399860858917,
+        "wall_ms_mean": 0.2506563498172909,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_eager_hostmeta": {
+        "kernel_ms_mean": 0.16078490026295186,
+        "kernel_ms_min": 0.14302000403404236,
+        "kernel_ms_p50": 0.159620001912117,
+        "kernel_ms_p99": 0.1974399983882904,
+        "wall_ms_mean": 0.17874457989819348,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_current_graph": {
+        "kernel_ms_mean": 0.45648300036787987,
+        "kernel_ms_min": 0.41176000237464905,
+        "kernel_ms_p50": 0.45399999618530273,
+        "kernel_ms_p99": 0.49880000948905945,
+        "wall_ms_mean": 0.4738122201524675,
+        "iters": 200,
+        "warmup": 32
+      },
+      "chain_fused_graph": {
+        "kernel_ms_mean": 0.42996569991111755,
+        "kernel_ms_min": 0.3465999960899353,
+        "kernel_ms_p50": 0.4300999939441681,
+        "kernel_ms_p99": 0.46261999011039734,
+        "wall_ms_mean": 0.4513324750587344,
+        "iters": 200,
+        "warmup": 32
+      },
+      "graph_launch_floor": {
+        "kernel_ms_mean": 0.2214358999580145,
+        "kernel_ms_min": 0.20586000382900238,
+        "kernel_ms_p50": 0.22044000029563904,
+        "kernel_ms_p99": 0.24079999327659607,
+        "wall_ms_mean": 0.24177067447453737,
+        "iters": 200,
+        "warmup": 32
+      }
+    }
+  ],
+  "repeat": {
+    "case": "official-ticket-urgent-r0",
+    "B": 1,
+    "S": 85,
+    "T": 85,
+    "graph_trace": {
+      "fused_graph": {
+        "new_frames": 1,
+        "traced": true
+      },
+      "chain_current_graph": {
+        "new_frames": 1,
+        "traced": true
+      },
+      "chain_fused_graph": {
+        "new_frames": 1,
+        "traced": true
+      },
+      "graph_launch_floor": {
+        "new_frames": 1,
+        "traced": true
+      }
+    },
+    "fused_eager": {
+      "kernel_ms_mean": 0.1337611997872591,
+      "kernel_ms_min": 0.11123999953269958,
+      "kernel_ms_p50": 0.13357999920845032,
+      "kernel_ms_p99": 0.1661199927330017,
+      "wall_ms_mean": 0.15511292964220047,
+      "iters": 200,
+      "warmup": 32
+    },
+    "fused_eager_fp16": {
+      "kernel_ms_mean": 0.1365210999920964,
+      "kernel_ms_min": 0.1113400012254715,
+      "kernel_ms_p50": 0.13694000244140625,
+      "kernel_ms_p99": 0.15685999393463135,
+      "wall_ms_mean": 0.15845271002035588,
+      "iters": 200,
+      "warmup": 32
+    },
+    "fused_eager_hostmeta": {
+      "kernel_ms_mean": 0.07485800007358194,
+      "kernel_ms_min": 0.054760001599788666,
+      "kernel_ms_p50": 0.07500000298023224,
+      "kernel_ms_p99": 0.08897999674081802,
+      "wall_ms_mean": 0.09746563504450023,
+      "iters": 200,
+      "warmup": 32
+    },
+    "fused_graph": {
+      "kernel_ms_mean": 0.36351859956979754,
+      "kernel_ms_min": 0.29853999614715576,
+      "kernel_ms_p50": 0.3636400103569031,
+      "kernel_ms_p99": 0.3836599886417389,
+      "wall_ms_mean": 0.3849969553994015,
+      "iters": 200,
+      "warmup": 32
+    },
+    "conv_only_eager": {
+      "kernel_ms_mean": 0.06972250014543534,
+      "kernel_ms_min": 0.04944000020623207,
+      "kernel_ms_p50": 0.06881999969482422,
+      "kernel_ms_p99": 0.0865200012922287,
+      "wall_ms_mean": 0.09213693963829428,
+      "iters": 200,
+      "warmup": 32
+    },
+    "chain_current_eager": {
+      "kernel_ms_mean": 0.27251570016145704,
+      "kernel_ms_min": 0.2544200122356415,
+      "kernel_ms_p50": 0.27202001214027405,
+      "kernel_ms_p99": 0.29791998863220215,
+      "wall_ms_mean": 0.29484558035619557,
+      "iters": 200,
+      "warmup": 32
+    },
+    "chain_fused_eager": {
+      "kernel_ms_mean": 0.2274654995650053,
+      "kernel_ms_min": 0.19189999997615814,
+      "kernel_ms_p50": 0.22166000306606293,
+      "kernel_ms_p99": 0.2749199867248535,
+      "wall_ms_mean": 0.24529940506909045,
+      "iters": 200,
+      "warmup": 32
+    },
+    "chain_fused_eager_hostmeta": {
+      "kernel_ms_mean": 0.15885290008969605,
+      "kernel_ms_min": 0.023760000243782997,
+      "kernel_ms_p50": 0.15860000252723694,
+      "kernel_ms_p99": 0.1777999997138977,
+      "wall_ms_mean": 0.17696527007501572,
+      "iters": 200,
+      "warmup": 32
+    },
+    "chain_current_graph": {
+      "kernel_ms_mean": 0.4642347998917103,
+      "kernel_ms_min": 0.4347600042819977,
+      "kernel_ms_p50": 0.46000000834465027,
+      "kernel_ms_p99": 0.5186600089073181,
+      "wall_ms_mean": 0.48269354505464435,
+      "iters": 200,
+      "warmup": 32
+    },
+    "chain_fused_graph": {
+      "kernel_ms_mean": 0.4417774002254009,
+      "kernel_ms_min": 0.41703999042510986,
+      "kernel_ms_p50": 0.43884000182151794,
+      "kernel_ms_p99": 0.5017200112342834,
+      "wall_ms_mean": 0.460802405141294,
+      "iters": 200,
+      "warmup": 32
+    },
+    "graph_launch_floor": {
+      "kernel_ms_mean": 0.2192937996983528,
+      "kernel_ms_min": 0.13711999356746674,
+      "kernel_ms_p50": 0.22164000570774078,
+      "kernel_ms_p99": 0.2508600056171417,
+      "wall_ms_mean": 0.24427779542747888,
+      "iters": 200,
+      "warmup": 32
+    }
+  },
+  "summary": {
+    "official-ticket-team-r0": {
+      "chain_current_graph_us": 465.50450026988983,
+      "chain_fused_graph_us": 451.7282998561859,
+      "delta_us_per_layer": 13.776200413703918,
+      "delta_us_per_request": 247.97160744667053,
+      "delta_pct": 2.959412939234049,
+      "graph_launch_floor_us": 242.4249005317688,
+      "chain_current_graph_minus_floor_us": 223.07959973812103,
+      "chain_fused_graph_minus_floor_us": 209.30339932441711,
+      "fused_eager_npu_metadata_d2h_cost_us": 76.10050018876791
+    },
+    "official-ticket-severity-r0": {
+      "chain_current_graph_us": 459.6585987508297,
+      "chain_fused_graph_us": 451.95820063352585,
+      "delta_us_per_layer": 7.700398117303848,
+      "delta_us_per_request": 138.60716611146927,
+      "delta_pct": 1.6752429168584,
+      "graph_launch_floor_us": 220.49829937517643,
+      "chain_current_graph_minus_floor_us": 239.16029937565327,
+      "chain_fused_graph_minus_floor_us": 231.45990125834942,
+      "fused_eager_npu_metadata_d2h_cost_us": 71.40029983595014
+    },
+    "official-ticket-urgent-r0": {
+      "chain_current_graph_us": 454.56289902329445,
+      "chain_fused_graph_us": 450.9365004301071,
+      "delta_us_per_layer": 3.626398593187332,
+      "delta_us_per_request": 65.27517467737198,
+      "delta_pct": 0.7977770735313562,
+      "graph_launch_floor_us": 229.53590027987957,
+      "chain_current_graph_minus_floor_us": 225.02699874341488,
+      "chain_fused_graph_minus_floor_us": 221.40060015022755,
+      "fused_eager_npu_metadata_d2h_cost_us": 66.91239954903722
+    },
+    "official-ticket-b3-r0": {
+      "chain_current_graph_us": 459.62459951639175,
+      "chain_fused_graph_us": 435.1060001552105,
+      "delta_us_per_layer": 24.51859936118126,
+      "delta_us_per_request": 441.33478850126266,
+      "delta_pct": 5.334483704087915,
+      "graph_launch_floor_us": 212.75670014321804,
+      "chain_current_graph_minus_floor_us": 246.8678993731737,
+      "chain_fused_graph_minus_floor_us": 222.34930001199245,
+      "fused_eager_npu_metadata_d2h_cost_us": 64.42830007523298
+    },
+    "official-image-damaged-r0": {
+      "chain_current_graph_us": 477.4449998140335,
+      "chain_fused_graph_us": 440.3083999454975,
+      "delta_us_per_layer": 37.136599868535995,
+      "delta_us_per_request": 668.4587976336479,
+      "delta_pct": 7.778194322487581,
+      "graph_launch_floor_us": 219.6827994287014,
+      "chain_current_graph_minus_floor_us": 257.7622003853321,
+      "chain_fused_graph_minus_floor_us": 220.6256005167961,
+      "fused_eager_npu_metadata_d2h_cost_us": 56.74050062894821
+    },
+    "long-seq-1001": {
+      "chain_current_graph_us": 456.48300036787987,
+      "chain_fused_graph_us": 429.96569991111755,
+      "delta_us_per_layer": 26.517300456762314,
+      "delta_us_per_request": 477.31140822172165,
+      "delta_pct": 5.80904446285886,
+      "graph_launch_floor_us": 221.4358999580145,
+      "chain_current_graph_minus_floor_us": 235.04710040986538,
+      "chain_fused_graph_minus_floor_us": 208.52979995310307,
+      "fused_eager_npu_metadata_d2h_cost_us": 67.68339961767197
+    },
+    "run_to_run_spread": {
+      "case": "official-ticket-urgent-r0",
+      "note": "smallest case re-run end to end (graph arms recompiled)",
+      "arms": {
+        "fused_eager": {
+          "first_us": 148.03309958428144,
+          "repeat_us": 133.7611997872591,
+          "delta_pct": -9.641019364656856
+        },
+        "fused_eager_fp16": {
+          "first_us": 149.73320003598928,
+          "repeat_us": 136.52109999209642,
+          "delta_pct": -8.823761223774856
+        },
+        "fused_eager_hostmeta": {
+          "first_us": 81.12070003524423,
+          "repeat_us": 74.85800007358193,
+          "delta_pct": -7.720224257114841
+        },
+        "conv_only_eager": {
+          "first_us": 69.5120002143085,
+          "repeat_us": 69.72250014543533,
+          "delta_pct": 0.30282531142515334
+        },
+        "chain_current_eager": {
+          "first_us": 286.74029916524887,
+          "repeat_us": 272.51570016145706,
+          "delta_pct": -4.96079520220984
+        },
+        "chain_fused_eager": {
+          "first_us": 242.6163000613451,
+          "repeat_us": 227.4654995650053,
+          "delta_pct": -6.244757871795483
+        },
+        "chain_fused_eager_hostmeta": {
+          "first_us": 174.83380004763603,
+          "repeat_us": 158.85290008969605,
+          "delta_pct": -9.14062381163468
+        },
+        "fused_graph": {
+          "first_us": 378.1525005400181,
+          "repeat_us": 363.5185995697975,
+          "delta_pct": -3.869841122119442
+        },
+        "chain_current_graph": {
+          "first_us": 454.56289902329445,
+          "repeat_us": 464.2347998917103,
+          "delta_pct": 2.1277365330953217
+        },
+        "chain_fused_graph": {
+          "first_us": 450.9365004301071,
+          "repeat_us": 441.7774002254009,
+          "delta_pct": -2.03112859481771
+        }
+      }
+    }
+  }
+}

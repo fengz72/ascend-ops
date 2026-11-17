@@ -2,7 +2,15 @@
 
 本仓库是 Ascend 自定义算子源码集合（vendored / 自建），供上层工程经构建脚本产出
 custom-opp 安装包并接入 torch。目录：`mega-gdn-prefill/`（vendored 三算子 +
-GE custom-op-v2 包装）、`mtgr_attention/`、`prefix-attention/`。
+GE custom-op-v2 包装）、`causal-conv1d/`（vendored fla-npu `CausalConv1d`，
+dense prefill）、`causal-conv1d-qkv/`（vendored xllm `CausalConv1dQkv`，
+varlen packed-QKV 融合）、`mtgr_attention/`、`prefix-attention/`。
+
+同名算子类型跨谱系冲突：`CausalConv1d` 同时存在于 `causal-conv1d/`（fla 谱系，
+`load_priority` 首位）与 `mega-gdn-prefill/`（xllm 旧谱系）；`causal-conv1d-qkv/`
+因此只注册 `CausalConv1dQkv`，其 vendored `causal_conv1d` 依赖仅作源码/头文件
+使用（tiling 定义经 shim TU 编译，屏蔽 `IMPL_OP_OPTILING(CausalConv1d)`）。
+新增算子包沿用此原则：不要往 opp 里再塞同名算子类型。
 
 ## torch 接入约定（必须遵守）
 
@@ -44,6 +52,13 @@ GE custom-op-v2 包装）、`mtgr_attention/`、`prefix-attention/`。
   python3 mega-gdn-prefill/test/test_mega_gdn_prefill.py [device]
   ```
   门禁：graph vs eager `rel_l2 < 0.001`，eager vs CPU golden `cos > 0.95`。
+- 其余 vendored 包同构（各自 `install.sh` + `test/`）：
+  ```bash
+  bash causal-conv1d/install.sh      && python3 causal-conv1d/test/test_causal_conv1d.py
+  bash causal-conv1d-qkv/install.sh  && python3 causal-conv1d-qkv/test/test_causal_conv1d_qkv.py
+  ```
+  `causal-conv1d-qkv` 额外门禁：`conv_states` 与 golden 逐位相等；图模式仅
+  `dynamic=True` 可用（详见其 README 已知限制）。
 
 ## 其他约定
 

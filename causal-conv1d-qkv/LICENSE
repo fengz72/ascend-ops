@@ -1,0 +1,18 @@
+causal-conv1d-qkv — license inventory
+
+1. Vendored operator sources
+   src/causal_conv1d/       (xllm_ops @ ecc8a32)
+   src/causal_conv1d_qkv/   (xllm_ops @ ecc8a32)
+   Huawei CANN Open Software License Agreement Version 2.0
+   (see LICENSES/CANN-Open-Software-License-Agreement-Version-2.0.txt).
+
+2. Build machinery (cmake/, common/, scripts/, src/CMakeLists.txt, src/build.sh)
+   Snapshot of the xllm_ops packaging machinery as adapted in
+   mega-gdn-prefill/, Huawei CANN Open Software License Agreement Version 2.0.
+
+3. Upstream xllm_ops repository license
+   Apache License Version 2.0 (see LICENSES/Apache-2.0.txt).
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
