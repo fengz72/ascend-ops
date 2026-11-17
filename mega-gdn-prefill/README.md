@@ -20,7 +20,7 @@ bash install.sh      # 一条命令：构建 .run + 安装算子到 $ASCEND_HOME
 `.so` 与 python 绑定统一由 CANN opp 的 vendor 包承载
 （`$ASCEND_OPP_PATH/vendors/mega_gdn_prefill/{op_api/lib, op_api/python}`；图模式
 kernel 编译走标准 tbe-custom store，故必须装入全局 opp）。activator import 时经
-`$ASCEND_CUSTOM_OPP_PATH`/`$ASCEND_OPP_PATH` 自发现 `.so`，dlopen（RTLD_GLOBAL，
+`$ASCEND_OPP_PATH`（优先）与 `$ASCEND_CUSTOM_OPP_PATH` 自发现 `.so`，dlopen（RTLD_GLOBAL，
 GE 可见 REG_OP）并挂载 vendor 包；eager 桥 JIT 链接同一 `.so`。pip 注册后随处
 import，零 shell 导出。多 vendor 环境需 `load_priority=mega_gdn_prefill` 写入
 `$ASCEND_OPP_PATH/vendors/config.ini`（install.sh 在该文件缺失时写入，已有其它
@@ -59,7 +59,10 @@ cmake/ common/ scripts/   构建机器与共享代码（有修改与裁剪，见
 
 1. **新增 `install.sh`**（原名 `build.sh`）：包装 `src/build.sh`，重定向
    `--build-dir`/`--cann_3rd_lib_path` 到 `build/`/`.cache/cann_3rd_lib`，保持源码树
-   干净；构建后自动安装 `.run` 到 CANN 全局 opp 并 pip 注册绑定。
+   干净；构建后自动安装 `.run` 到 CANN 全局 opp 并 pip 注册绑定。安装路径、`config.ini`
+   与 pip 注册统一绑定 `OPP_ROOT=$ASCEND_HOME_PATH/opp`（不跟随可被其它 wheel 的
+   `.pth` 重定向到未安装树的 `ASCEND_OPP_PATH`）；`nullglob` 保证零产物时 `-eq 1`
+   断言失败，而不是把字面量交给 `bash`。
 2. **cmake 文件**：
    - `cmake/third_party/abseil-cpp.cmake` + `ascend_protobuf.cmake`：第三方解压
      落点重定向到 `${CANN_3RD_LIB_PATH}`（上游写进源码树）；
@@ -80,6 +83,10 @@ cmake/ common/ scripts/   构建机器与共享代码（有修改与裁剪，见
    + `mega_gdn_prefill_bridge.cpp`（JIT eager 桥）、`python/pyproject.toml`（pip
    editable 元数据）；删除旧 `python/custom_ops_lib.py`（ctypes）与
    `python/torchair.py`（死 shim，torch_npu 注入顶层 torchair 别名）。
+   `find_op_lib()` 先查 `$ASCEND_OPP_PATH` 的 vendor 树、再查
+   `$ASCEND_CUSTOM_OPP_PATH` 各 root，并校验解析到的 `.so` 导出
+   `mega_gdn_prefill_run_v2`——fla wheel 的 `.pth` 会把 `ASCEND_CUSTOM_OPP_PATH`
+   指向自身同名 `libcust_opapi.so`，旧顺序会静默 dlopen 错库。
 6. **裁剪与三算子无关的上游遗留**（约 100 个文件），构建产物逐字节等价（仅
    `libcust_opmaster_rt2.0.so` 少 4 个 fallback 死代码导出符号，CANN built-in
    自带同名符号）：

@@ -26,6 +26,7 @@ import torch_npu  # noqa: F401  PrivateUse1 dispatch + torchair alias injection
 
 LIB_NAME = "libcust_opapi.so"
 VENDOR_NAME = "mega_gdn_prefill"
+RUN_SYMBOL = "mega_gdn_prefill_run_v2"
 
 NAMES = ["mixed_qkv", "b", "a", "z", "conv_weight", "conv_state", "a_log", "dt_bias",
          "conv_state_read_indices", "conv_state_write_indices", "ssm_state_read_indices",
@@ -58,22 +59,27 @@ def _vendor_lib(root):
 def find_op_lib():
     """Locate the installed libcust_opapi.so.
 
-    Search order: ASCEND_CUSTOM_OPP_PATH roots, then the CANN opp tree
-    ($ASCEND_OPP_PATH, where install.sh installs the vendor package).
+    Search order: the canonical CANN opp tree ($ASCEND_OPP_PATH, where
+    install.sh installs the vendor package) first, then $ASCEND_CUSTOM_OPP_PATH
+    roots. Other packages (the fla wheel, causal-conv1d) mount their own
+    libcust_opapi.so into ASCEND_CUSTOM_OPP_PATH; the opp tree goes first so a
+    same-named lib cannot shadow this package's. The loaded lib is verified to
+    export mega_gdn_prefill_run_v2 so a wrong lib fails loud.
     """
-    for root in os.environ.get("ASCEND_CUSTOM_OPP_PATH", "").split(":"):
-        if root:
-            found = _vendor_lib(root)
-            if found:
-                return found
+    candidates = []
     opp = os.environ.get("ASCEND_OPP_PATH")
     if opp:
-        found = _vendor_lib(opp)
+        candidates.append(opp)
+    candidates.extend(
+        root for root in os.environ.get("ASCEND_CUSTOM_OPP_PATH", "").split(":")
+        if root)
+    for root in candidates:
+        found = _vendor_lib(root)
         if found:
             return found
     raise FileNotFoundError(
-        f"{LIB_NAME} not found (looked in $ASCEND_CUSTOM_OPP_PATH and "
-        "$ASCEND_OPP_PATH); install the operator first: "
+        f"{LIB_NAME} not found (looked in $ASCEND_OPP_PATH and "
+        "$ASCEND_CUSTOM_OPP_PATH); install the operator first: "
         "bash mega-gdn-prefill/install.sh with CANN set_env.sh sourced")
 
 
@@ -141,8 +147,13 @@ def ensure_loaded():
     if _LOADED:
         return
     op_lib = find_op_lib()
+    lib = ctypes.CDLL(op_lib, mode=ctypes.RTLD_GLOBAL)
+    if not hasattr(lib, RUN_SYMBOL):
+        raise ImportError(
+            f"{op_lib} does not export {RUN_SYMBOL}; another vendor's "
+            "libcust_opapi.so with the same name was found — check "
+            "ASCEND_CUSTOM_OPP_PATH shadowing and reinstall this package")
     _mount_opp(op_lib)
-    ctypes.CDLL(op_lib, mode=ctypes.RTLD_GLOBAL)
     _register_torch_op()
     _LOADED = True
 

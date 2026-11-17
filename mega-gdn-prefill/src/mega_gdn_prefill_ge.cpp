@@ -70,6 +70,10 @@ aclDataType ToAclDataType(ge::DataType dataType) {
 aclTensor *MakeAclTensor(const gert::Tensor *tensor) {
   const auto &shape = tensor->GetOriginShape();
   const size_t dimNum = shape.GetDimNum();
+  if (dimNum == 0) {
+    // Guards the stride loop below (dimNum - 1 would wrap to SIZE_MAX).
+    return nullptr;
+  }
   std::vector<int64_t> dims(dimNum);
   std::vector<int64_t> strides(dimNum, 1);
   for (size_t i = 0; i < dimNum; ++i) {
@@ -118,6 +122,10 @@ size_t TensorBytes(const gert::Tensor *tensor) {
 aclTensor *MakeScratchAclTensor(const gert::Tensor *tensor, void *addr) {
   const auto &shape = tensor->GetOriginShape();
   const size_t dimNum = shape.GetDimNum();
+  if (dimNum == 0) {
+    // Guards the stride loop below (dimNum - 1 would wrap to SIZE_MAX).
+    return nullptr;
+  }
   std::vector<int64_t> dims(dimNum);
   std::vector<int64_t> strides(dimNum, 1);
   for (size_t i = 0; i < dimNum; ++i) {
@@ -214,8 +222,18 @@ class MegaGdnPrefill : public ge::EagerExecuteOp, public ge::ShapeInferOp {
     }
     aclTensor *aclConvStateOut = MakeScratchAclTensor(
         inputs[kIdxConvState], scratch);
+    if (aclConvStateOut == nullptr) {
+      // A failed wrap must not be passed to aclnn as "no state buffer".
+      std::fprintf(stderr, "MegaGdnPrefill: fail make_acl conv_state_out\n");
+      return ge::GRAPH_FAILED;
+    }
     aclTensor *aclSsmCacheOut = MakeScratchAclTensor(
         inputs[kIdxSsmCache], scratch + ssmCacheOffset);
+    if (aclSsmCacheOut == nullptr) {
+      aclDestroyTensor(aclConvStateOut);
+      std::fprintf(stderr, "MegaGdnPrefill: fail make_acl ssm_cache_out\n");
+      return ge::GRAPH_FAILED;
+    }
 
     aclTensor *aclInputs[kNumInputs];
     for (int i = 0; i < kNumInputs; ++i) {
@@ -229,6 +247,16 @@ class MegaGdnPrefill : public ge::EagerExecuteOp, public ge::ShapeInferOp {
       }
     }
     aclTensor *aclNormOutput = MakeAclTensor(normOutput);
+    if (aclNormOutput == nullptr) {
+      // A failed wrap must not be passed to aclnn as "no output".
+      for (int i = 0; i < kNumInputs; ++i) {
+        aclDestroyTensor(aclInputs[i]);
+      }
+      aclDestroyTensor(aclConvStateOut);
+      aclDestroyTensor(aclSsmCacheOut);
+      std::fprintf(stderr, "MegaGdnPrefill: fail make_acl out\n");
+      return ge::GRAPH_FAILED;
+    }
     uint64_t workspaceSize = 0;
     aclOpExecutor *executor = nullptr;
     aclnnStatus status = aclnnMegaGdnPrefillOpGetWorkspaceSize(
