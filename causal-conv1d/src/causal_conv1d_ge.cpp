@@ -50,6 +50,10 @@ aclTensor *MakeAclTensor(const gert::Tensor *tensor) {
   // dim-last contiguous tensors; gert::Tensor exposes no strides to check.
   const auto &shape = tensor->GetOriginShape();
   const size_t dimNum = shape.GetDimNum();
+  if (dimNum == 0) {
+    // Guards the stride loop below (dimNum - 1 would wrap to SIZE_MAX).
+    return nullptr;
+  }
   std::vector<int64_t> dims(dimNum);
   std::vector<int64_t> strides(dimNum, 1);
   for (size_t i = 0; i < dimNum; ++i) {

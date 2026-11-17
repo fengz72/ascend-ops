@@ -22,6 +22,8 @@ bash build.sh --pkg --ops="${OPS}" --soc="${SOC_VERSION:-ascend910_93}" \
 # 全局 opp 必须有本包。同名算子类型 CausalConv1d 也存在于 mega_gdn_prefill
 # vendor 包（vendored xllm 旧谱系，本仓库无运行时调用方）；config.ini 里把
 # 本包放在 load_priority 首位即可让 GE/aclnn 解析到本包的 fla 谱系版本。
+# nullglob: 没有产物时数组必须为空，否则字面量会骗过下面的 -eq 1 断言。
+shopt -s nullglob
 RUNS=("${BUILD_DIR}"/causal_conv1d_linux*.run)
 [ "${#RUNS[@]}" -eq 1 ] || { echo "error: expected exactly one installer, got ${#RUNS[@]}" >&2; exit 1; }
 echo "installing operator into \$ASCEND_HOME_PATH/opp"
