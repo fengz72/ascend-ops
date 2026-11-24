@@ -12,6 +12,12 @@ varlen packed-QKV 融合）、`mtgr_attention/`、`prefix-attention/`。
 使用（tiling 定义经 shim TU 编译，屏蔽 `IMPL_OP_OPTILING(CausalConv1d)`）。
 新增算子包沿用此原则：不要往 opp 里再塞同名算子类型。
 
+接入 GE 的完整规范见 [docs/ge-integration-spec.md](docs/ge-integration-spec.md)
+（包结构与交付件、GE 接入路线选择、符号面与构建卫生、torch 接入、装载与部署
+契约、共存与冲突、测试门禁、版本矩阵）：新增包与整改以该规范为准，本文件
+仅保留常用约定。`mtgr_attention/` 为 TileLang DSL 实现（非 custom_op_v2
+交付件），规范 §2–§7 对其不适用。
+
 ## torch 接入约定（必须遵守）
 
 自定义算子接入 torch 时，**统一挂载到 `torch.ops.ascend_ops` 命名空间**，
