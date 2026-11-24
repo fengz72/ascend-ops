@@ -1,0 +1,7 @@
+{
+  global:
+    causal_conv1d_qkv_run;
+    aclnnCausalConv1dQkv*;
+  local:
+    *;
+};

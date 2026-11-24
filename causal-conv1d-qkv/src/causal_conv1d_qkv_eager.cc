@@ -120,7 +120,8 @@ WorkspaceCache &CachedWorkspace() {
 
 }  // namespace
 
-extern "C" int causal_conv1d_qkv_run(
+// hidden by default (-fvisibility=hidden); the JIT bridge dlsyms this name.
+extern "C" __attribute__((visibility("default"))) int causal_conv1d_qkv_run(
     void *const *addrs, const int64_t *dims, const int64_t *strides,
     const int32_t *dtypes, const int32_t *dim_nums, int64_t activation_mode,
     int64_t pad_slot_id, int64_t run_mode, int64_t q_dim, int64_t k_dim,

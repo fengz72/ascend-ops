@@ -222,7 +222,11 @@ test/                      精度门禁 + 性能 bench（bench_causal_conv1d_qkv
 
 - `src/CMakeLists.txt`：`VENDOR_NAME` → `causal_conv1d_qkv`
 - `cmake/custom_build.cmake`：GE/eager 钩子改指本包三件；`op_api/python` 安装
-  规则改为按文件名通配（`*.py *.toml *.cpp *.h`）；`op_add_depend_directory`
+  规则改为按文件名通配（`*.py *.toml *.cpp *.h`）；cust_opapi 补
+  `-fvisibility=hidden`，并追加链接期白名单
+  `cmake/cust_opapi_exports.map`（global：`causal_conv1d_qkv_run`、
+  `aclnnCausalConv1dQkv*`；local：`*`），flat 入口在
+  `src/causal_conv1d_qkv_eager.cc` 显式 `visibility("default")`；`op_add_depend_directory`
   后从 `OP_DEPEND_DIR_LIST` 剔除 `causal_conv1d`（只留 kernel 源/头拷贝，不建
   其 `op_host`）；依赖算子的 kernel 头安装恒追加 `arch35/`（`causal_conv1d.h`
   无条件 include 它，而 `filter_copy_files` 只挑当前 arch）；`.run` 更名
@@ -274,12 +278,12 @@ test/                      精度门禁 + 性能 bench（bench_causal_conv1d_qkv
 - 门禁已覆盖两步解码链（第一步写回的历史被第二步以 `initial_state_mode=1`
   读回，eager 与 graph 均与链式 golden 逐位一致）；更长的解码循环未断言
 - 仅在 ascend910_93 + CANN 9.1.0 验证；OpDef 另声明 ascend910b/ascend950
-- 同进程共存多份同名 `libcust_opapi.so`（本包 / `causal-conv1d` / fla wheel）
-  靠的是两点：各 activator 以 `RTLD_GLOBAL` dlopen，且 flat ABI 符号名包内唯一
-  （`causal_conv1d_qkv_run` 只在本包里）——同 SONAME 一旦全局加载，后续依赖方的
-  `DT_NEEDED` 会解析到先加载者，**桥的 rpath 不构成保护**。bench 已同进程共载
-  本包与 `causal-conv1d` 且全绿；activator 另以 `$ASCEND_OPP_PATH` 优先定位并
-  校验符号 fail-loud
+- 同进程共存多份同名 `libcust_opapi.so`（本包 / `causal-conv1d` / fla wheel）：
+  activator 以 `RTLD_LOCAL` dlopen，且本包按官方 cust_opapi 模板
+  `-fvisibility=hidden` + 导出白名单收口，vendor 副本的 CANN 内部符号不会被
+  提升到全局作用域；flat ABI 符号名仍包内唯一（`causal_conv1d_qkv_run` 只在
+  本包里），activator 另以 `$ASCEND_OPP_PATH` 优先定位并校验符号 fail-loud。
+  同 SONAME 的 `DT_NEEDED` 仍会解析到先加载者，**桥的 rpath 不构成保护**
 - **`aclnnCausalConv1dQkvTensorGetWorkspaceSize` 不可用于设备侧元数据**：
   nnopbase 不为 `ValueDepend` 输入做 D2H，直接把 device 地址当 host 内存读，
   实测先报 tiling 561002、再复现即段错误。两条腿都只用 `aclIntArray` 变体

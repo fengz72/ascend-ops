@@ -1,11 +1,14 @@
 """Activator for the CausalConv1dQkvGE custom-op-v2 wrapper.
 
 On import: locates the installed libcust_opapi.so (CANN vendor package),
-dlopens it (RTLD_GLOBAL) so GE sees the REG_OP, mounts the vendor package
+dlopens it (RTLD_LOCAL) and mounts the vendor package
 into ASCEND_CUSTOM_OPP_PATH, then registers
 torch.ops.ascend_ops.causal_conv1d_qkv (Meta + PrivateUse1) and the torchair
 GE converter. With the binding pip-installed the operator imports from
 anywhere; no shell exports are needed.
+
+RTLD_LOCAL: REG_OP registers via static initializers, so GE needs no global
+symbol scope; LOCAL keeps this vendor copy from shadowing CANN's own symbols.
 
 Contract: packed-QKV prefill only — x BF16 (T,D) varlen, weight BF16 (4,D),
 no bias, conv_states BF16 (slots, 3, D) mutated in place, metadata (1-D
@@ -182,7 +185,7 @@ def ensure_loaded():
     if _LOADED:
         return
     op_lib = find_op_lib()
-    lib = ctypes.CDLL(op_lib, mode=ctypes.RTLD_GLOBAL)
+    lib = ctypes.CDLL(op_lib, mode=ctypes.RTLD_LOCAL)
     if not hasattr(lib, RUN_SYMBOL):
         raise ImportError(
             f"{op_lib} does not export {RUN_SYMBOL}; another vendor's "
