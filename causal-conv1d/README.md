@@ -116,8 +116,11 @@ test/                 精度门禁
 - `cmake/custom_build.cmake`：cust_opapi 目标后挂 EXISTS 守卫钩子，把
   `src/causal_conv1d_ge.cpp`、`src/causal_conv1d_eager.cc` 编进单一
   `libcust_opapi.so`，并把 `python/` 四件随 vendor 包 `op_api/python`
-  安装；删除 fla wheel 专用的 CPack ABI-manifest 前置脚本（本包不随
-  launcher 交付）
+  安装；cust_opapi 补 `-fvisibility=hidden`，并追加链接期白名单
+  `cmake/cust_opapi_exports.map`（global：`causal_conv1d_run`、
+  `aclnnCausalConv1d*`；local：`*`），flat 入口在
+  `src/causal_conv1d_eager.cc` 显式 `visibility("default")`；删除 fla wheel
+  专用的 CPack ABI-manifest 前置脚本（本包不随 launcher 交付）
 - `build.sh`：fla Stable-ABI launcher 门禁跳过（torch_custom 不随本包
   交付）
 - `version.cmake` / `version.info`：随根 CMakeLists 引入（机制文件）
@@ -127,6 +130,6 @@ test/                 精度门禁
 
 - 部署环境同时安装 fla-npu wheel（`fla_npu_transformer` vendor 包）时，
   两份 `libcust_opapi.so` 同名共存：activator 以 `$ASCEND_OPP_PATH` 优先
-  定位本包并校验 `causal_conv1d_run` 符号 fail-loud；同进程先后 dlopen
-  两份库时退出阶段可能报 `double free or corruption`（进程退出清理顺序，
-  不影响计算结果；生产 runtime 只装本包即无此现象）
+  定位本包并校验 `causal_conv1d_run` 符号 fail-loud；activator 以 `RTLD_LOCAL`
+  装载，且本包按官方 cust_opapi 模板 `-fvisibility=hidden` + 导出白名单收口，
+  同进程共载或先后 dlopen 都不会把 vendor 副本符号提升到全局作用域

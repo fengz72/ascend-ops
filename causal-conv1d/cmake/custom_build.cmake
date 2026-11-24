@@ -78,6 +78,9 @@ if (BUILD_OPEN_PROJECT)
     )
     target_compile_options(cust_opapi PRIVATE
             -Werror=format
+            # CANN 官方 cust_opapi 模板统一 hidden；否则本库会把 CANN 内部
+            # 状态（StatusFactory/Dlog 等）带进全局符号表，多份副本互窜。
+            -fvisibility=hidden
     )
     target_compile_definitions(cust_opapi PRIVATE
             -DACLNN_LOG_FMT_CHECK
@@ -100,6 +103,12 @@ if (BUILD_OPEN_PROJECT)
             cust_opapi
             NO_SONAME ON
     )
+    # whole-archive 预编译对象不受上面的编译 flag 约束，STL/dlog 弱符号仍会
+    # 导出；链接期白名单只放行 flat 入口与 aclnn C 入口。
+    target_link_options(cust_opapi PRIVATE
+            "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/cust_opapi_exports.map")
+    set_property(TARGET cust_opapi APPEND PROPERTY LINK_DEPENDS
+            ${CMAKE_CURRENT_LIST_DIR}/cust_opapi_exports.map)
     if (NOT ENABLE_BUILT_IN)
         install(TARGETS cust_opapi
                 LIBRARY DESTINATION packages/vendors/${VENDOR_NAME}/op_api/lib

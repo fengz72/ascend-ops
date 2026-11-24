@@ -1,0 +1,7 @@
+{
+  global:
+    causal_conv1d_run;
+    aclnnCausalConv1d*;
+  local:
+    *;
+};

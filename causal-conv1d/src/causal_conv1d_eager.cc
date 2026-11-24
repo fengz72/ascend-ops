@@ -23,7 +23,9 @@ aclTensor *MakeAclTensor(const int64_t *dims, const int64_t *strides,
 
 }  // namespace
 
-extern "C" int causal_conv1d_run(void *const *addrs, const int64_t *dims,
+// hidden by default (-fvisibility=hidden); the JIT bridge dlsyms this name.
+extern "C" __attribute__((visibility("default"))) int causal_conv1d_run(
+                                 void *const *addrs, const int64_t *dims,
                                  const int64_t *strides,
                                  const int32_t *dtypes,
                                  const int32_t *dimNums,
