@@ -67,7 +67,9 @@ thread_local Scratch g_scratch{nullptr, 0, -1};
 
 }  // namespace
 
-extern "C" int mega_gdn_prefill_run_v2(void *const *addrs, const int64_t *dims,
+// hidden by default (-fvisibility=hidden); the JIT bridge dlsyms this name.
+extern "C" __attribute__((visibility("default"))) int mega_gdn_prefill_run_v2(
+                                       void *const *addrs, const int64_t *dims,
                                        const int64_t *strides,
                                        const int32_t *dtypes,
                                        const int32_t *dimNums,

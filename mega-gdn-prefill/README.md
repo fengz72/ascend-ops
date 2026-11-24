@@ -20,8 +20,9 @@ bash install.sh      # 一条命令：构建 .run + 安装算子到 $ASCEND_HOME
 `.so` 与 python 绑定统一由 CANN opp 的 vendor 包承载
 （`$ASCEND_OPP_PATH/vendors/mega_gdn_prefill/{op_api/lib, op_api/python}`；图模式
 kernel 编译走标准 tbe-custom store，故必须装入全局 opp）。activator import 时经
-`$ASCEND_OPP_PATH`（优先）与 `$ASCEND_CUSTOM_OPP_PATH` 自发现 `.so`，dlopen（RTLD_GLOBAL，
-GE 可见 REG_OP）并挂载 vendor 包；eager 桥 JIT 链接同一 `.so`。pip 注册后随处
+`$ASCEND_OPP_PATH`（优先）与 `$ASCEND_CUSTOM_OPP_PATH` 自发现 `.so`，dlopen（RTLD_LOCAL，
+REG_OP 由静态初始化器注册、与符号作用域无关；LOCAL 防 vendor 副本遮蔽 CANN 符号）
+并挂载 vendor 包；eager 桥 JIT 链接同一 `.so`。pip 注册后随处
 import，零 shell 导出。多 vendor 环境需 `load_priority=mega_gdn_prefill` 写入
 `$ASCEND_OPP_PATH/vendors/config.ini`（install.sh 在该文件缺失时写入，已有其它
 条目时告警）。
@@ -70,7 +71,12 @@ cmake/ common/ scripts/   构建机器与共享代码（有修改与裁剪，见
      把 `src/mega_gdn_prefill_ge.cpp` 与 `src/mega_gdn_prefill_eager.cc` 编进
      `cust_opapi`（aclnn 实现、GE 包装与 eager flat 入口为单一
      `libcust_opapi.so`）；(c) python 四件 install 进 vendor `op_api/python`
-     （部署机脱离源码树安装）。
+     （部署机脱离源码树安装）；(d) cust_opapi 按官方模板补 `-fvisibility=hidden`、
+     `NO_SONAME`、`-Wl,-Bsymbolic`，并追加链接期白名单
+     `cmake/cust_opapi_exports.map`（global：`mega_gdn_prefill_run_v2`、
+     `aclnnMegaGdnPrefillOp*`、`aclnnMegaChunkGdn*`、`aclnnCausalConv1d*`；
+     local：`*`），flat 入口在 `src/mega_gdn_prefill_eager.cc` 显式
+     `visibility("default")`。
 3. **`src/attention/`** 仅保留 `CMakeLists.txt`（装配过滤器，上游
    `add_subdirectory` 无条件引用它）。
 4. **`.gitignore`** 追加 `.cache/`、`test/_ge_out/`。
@@ -86,7 +92,9 @@ cmake/ common/ scripts/   构建机器与共享代码（有修改与裁剪，见
    `find_op_lib()` 先查 `$ASCEND_OPP_PATH` 的 vendor 树、再查
    `$ASCEND_CUSTOM_OPP_PATH` 各 root，并校验解析到的 `.so` 导出
    `mega_gdn_prefill_run_v2`——fla wheel 的 `.pth` 会把 `ASCEND_CUSTOM_OPP_PATH`
-   指向自身同名 `libcust_opapi.so`，旧顺序会静默 dlopen 错库。
+   指向自身同名 `libcust_opapi.so`，旧顺序会静默 dlopen 错库。同名 `.so` 共载时
+   各 activator 以 `RTLD_LOCAL` 装载，且本包 hidden + 导出白名单收口，vendor
+   副本的 CANN 内部符号不会进入全局作用域。
 6. **裁剪与三算子无关的上游遗留**（约 100 个文件），构建产物逐字节等价（仅
    `libcust_opmaster_rt2.0.so` 少 4 个 fallback 死代码导出符号，CANN built-in
    自带同名符号）：

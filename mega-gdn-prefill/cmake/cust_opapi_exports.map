@@ -1,0 +1,9 @@
+{
+  global:
+    mega_gdn_prefill_run_v2;
+    aclnnMegaGdnPrefillOp*;
+    aclnnMegaChunkGdn*;
+    aclnnCausalConv1d*;
+  local:
+    *;
+};
