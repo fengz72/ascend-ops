@@ -67,6 +67,30 @@ max_segs   = T.symbolic("max_segs")
 
 **诉求**：`batch` / `total_q` / `num_blocks` / `max_blocks` / `max_segs` 五个维（A3 基线用 `T.symbolic` 声明；对应 cannbot-dsl `TensorSpec` 的 `batch` / `total` / `cache_blocks` / `table_cols` / `segments`）作为运行时参数传入：一次编译，产物服务所有形状，输入形状变化不再重新编译。
 
+**示例**: `transpose_bmm_bias_relu.py`
+```python
+@lru_cache(maxsize=_PROGRAM_CACHE_SIZE)
+def _get_dynamic_program(dtype: torch.dtype, transpose_b: bool) -> "ProviderCallable":
+    """Compile one shape-dynamic program per dtype and B layout."""
+    t = TransposeBmmBiasReluTiling(dtype, transpose_b)
+    # A is a strided metadata view of the original contiguous [M, batch, K].
+    m = Dim('M', min=1)
+    batch = Dim('BATCH', min=1)
+    k = Dim('K', min=1)
+    n = Dim('N', min=1)
+    a_spec = TensorSpec((batch, m, k), t.dtype, stride=(k, batch * k, 1))
+    b_spec = TensorSpec((batch, n, k) if transpose_b else (batch, k, n), t.dtype)
+    c_spec = TensorSpec(
+        (
+            _ceil_align(m, t.base_m),
+            batch * _ceil_align(n, t.base_n),
+        ),
+        t.dtype,
+    )
+    bias_spec = TensorSpec((batch, n), t.dtype)
+    return compile_program(TransposeBmmBiasReluKernel(t).run, a_spec, b_spec, c_spec, bias_spec)
+```
+
 **验收标准**：一次编译后，同一份产物在第 2 节表格的 7 种形状下均正确执行（至少覆盖 `total_q` = 308 / 3008 / 32104），无需重新编译。
 
 ---
